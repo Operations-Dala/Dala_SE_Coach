@@ -1,36 +1,50 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://github.com/vercel/next.js/tree/canary/packages/create-next-app).
+This is a private admin dashboard built with Next.js.
+
+## Environment
+
+Create `.env.local` from `.env.example` and set at least:
+
+- `NEXT_PUBLIC_SUPABASE_URL`
+- `SUPABASE_SERVICE_ROLE_KEY`
+- `ADMIN_LOCK_ENABLED`
+- `ADMIN_USERNAME`
+- `ADMIN_PASSWORD`
+- `ADMIN_SESSION_SECRET`
+
+Optional secrets:
+
+- `GEMINI_API_KEY`
+- `TELEGRAM_WEBHOOK_URL`
+- `SUPABASE_ACCESS_TOKEN`
+- `SENTRY_DSN`
+- `NEXT_PUBLIC_SENTRY_DSN`
 
 ## Getting Started
 
-First, run the development server:
+Run the development server:
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open `http://localhost:3000` and sign in with the admin password.
 
-You can start editing the page by modifying `app/page.js`. The page auto-updates as you edit the file.
+If you want no login on your PC, keep `ADMIN_LOCK_ENABLED=false` locally.
+For Railway or any public deployment, set `ADMIN_LOCK_ENABLED=true`.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Security Notes
 
-## Learn More
+- Do not commit `.env.local`.
+- Do not hardcode API keys in source files.
+- Rotate any key that was previously committed or shared.
+- All pages and API routes can be protected by the admin password gate when `ADMIN_LOCK_ENABLED=true`.
 
-To learn more about Next.js, take a look at the following resources:
+## Deployment
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+Before pushing or deploying, run:
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+- `npm test`
+- `npm run lint`
+- `npm run build`
 
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Railway can deploy the app directly from GitHub once the same environment variables are added to the Railway service.

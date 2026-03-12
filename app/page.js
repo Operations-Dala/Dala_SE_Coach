@@ -1,53 +1,81 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { STATUS_META, buildRankSparkline } from '@/lib/tier-engine';
+import { STATUS_META } from '@/lib/tier-engine';
 
-// Zone display order
 const ZONE_ORDER = ['Zone 1', 'Zone 2', 'Zone 3', 'Zone 4', 'All Corporate', 'Trial'];
 
-export default function Dashboard() {
-  const [date, setDate]           = useState(yesterdayStr());
-  const [reports, setReports]     = useState([]);
-  const [analytics, setAnalytics] = useState(null);
-  const [loading, setLoading]     = useState(false);
-  const [uploading, setUploading] = useState(false);
-  const [coaching, setCoaching]   = useState(false);
-  const [message, setMessage]     = useState(null);
-  const [files, setFiles]         = useState({ checkin: null, product: null, feedback: null });
-  const [debtScores, setDebtScores] = useState({});
-  const [uploadOpen, setUploadOpen] = useState(false);
-  const [filterStatus, setFilterStatus] = useState('all');
-  const [tableView, setTableView]       = useState('zone'); // 'zone' | 'list'
+const DATE_RANGE_PRESETS = [
+  { label: '7D',  getDays: () => 7,  getStartDate: (d) => shiftDate(d, -6) },
+  { label: '2W',  getDays: () => 14, getStartDate: (d) => shiftDate(d, -13) },
+  { label: '1M',  getDays: () => 30, getStartDate: (d) => shiftDate(d, -29) },
+  { label: 'Q1',  getDays: (d) => quarterDays(d, 1), getStartDate: (d) => quarterStartStr(d, 1) },
+  { label: 'Q2',  getDays: (d) => quarterDays(d, 2), getStartDate: (d) => quarterStartStr(d, 2) },
+  { label: 'Q3',  getDays: (d) => quarterDays(d, 3), getStartDate: (d) => quarterStartStr(d, 3) },
+  { label: 'Q4',  getDays: (d) => quarterDays(d, 4), getStartDate: (d) => quarterStartStr(d, 4) },
+  { label: 'YTD', getDays: (d) => ytdDays(d),        getStartDate: (d) => `${d.slice(0,4)}-01-01` },
+];
 
-  const loadData = useCallback(async (d) => {
+export default function Dashboard() {
+  const [date, setDate]               = useState(yesterdayStr());
+  const [selectedRange, setSelectedRange] = useState(null);
+  const [reports, setReports]         = useState([]);
+  const [analytics, setAnalytics]     = useState(null);
+  const [rangeData, setRangeData]     = useState(null);
+  const [trends, setTrends]           = useState(null);
+  const [loading, setLoading]         = useState(false);
+  const [uploading, setUploading]     = useState(false);
+  const [uploadingDebt, setUploadingDebt] = useState(false);
+  const [coaching, setCoaching]       = useState(false);
+  const [message, setMessage]         = useState(null);
+  const [files, setFiles]             = useState({ checkin: null, product: null, feedback: null });
+  const [debtFile, setDebtFile]       = useState(null);
+  const [debtWeek, setDebtWeek]       = useState('');
+  const [uploadOpen, setUploadOpen]   = useState(false);
+  const [uploadTab, setUploadTab]     = useState('daily');
+  const [tableView, setTableView]     = useState('zone');
+  const [filterStatus, setFilterStatus] = useState('all');
+  const [rangeView, setRangeView]     = useState('zone');
+
+  const loadData = useCallback(async (d, range) => {
     setLoading(true);
+    const days = range ? range.getDays(d) : 7;
     try {
-      const [reportsRes, analyticsRes] = await Promise.all([
+      const fetches = [
         fetch(`/api/reports?date=${d}`),
-        fetch(`/api/analytics?date=${d}&days=7`),
-      ]);
-      const reportsData   = await reportsRes.json();
-      const analyticsData = await analyticsRes.json();
+        fetch(`/api/analytics?date=${d}&days=${days}`),
+        fetch(`/api/trends?days=30`),
+      ];
+      if (range) {
+        const startDate = range.getStartDate(d);
+        fetches.push(fetch(`/api/reports/range?startDate=${startDate}&endDate=${d}`));
+      }
+      const results = await Promise.all(fetches);
+      const [reportsData, analyticsData, trendsData] = await Promise.all(results.slice(0, 3).map(r => r.json()));
       setReports(Array.isArray(reportsData) ? reportsData : []);
       setAnalytics(analyticsData?.summary ? analyticsData : null);
+      setTrends(trendsData?.daily ? trendsData : null);
+      if (range && results[3]) {
+        const rd = await results[3].json();
+        setRangeData(rd?.summary ? rd : null);
+      } else {
+        setRangeData(null);
+      }
     } catch {}
     setLoading(false);
   }, []);
 
-  useEffect(() => { loadData(date); }, [date, loadData]);
+  useEffect(() => { loadData(date, selectedRange); }, [date, selectedRange, loadData]);
 
-  // Pre-fill debt scores from last known values when analytics loads
-  useEffect(() => {
-    if (analytics?.lastDebtScores) {
-      setDebtScores(prev => {
-        const merged = { ...analytics.lastDebtScores };
-        // Don't overwrite values the user already changed this session
-        Object.entries(prev).forEach(([k, v]) => { merged[k] = v; });
-        return merged;
-      });
+  function handleRangeSelect(preset) {
+    if (selectedRange?.label === preset.label) {
+      setSelectedRange(null);
+      setRangeData(null);
+    } else {
+      setSelectedRange(preset);
     }
-  }, [analytics?.lastDebtScores]);
+  }
+
 
   async function handleUpload(e) {
     e.preventDefault();
@@ -62,18 +90,44 @@ export default function Dashboard() {
     fd.append('product',  files.product);
     fd.append('feedback', files.feedback);
     fd.append('date',     date);
-    fd.append('debt_scores', JSON.stringify(debtScores));
     try {
       const res  = await fetch('/api/upload', { method: 'POST', body: fd });
       const data = await res.json();
       if (data.error) throw new Error(data.error);
       setMessage({ type: 'success', text: `Processed ${data.processed} SEs for ${data.date}` });
       setUploadOpen(false);
-      loadData(date);
+      loadData(date, selectedRange);
     } catch (err) {
       setMessage({ type: 'error', text: err.message });
     }
     setUploading(false);
+  }
+
+  async function handleDebtUpload(e) {
+    e.preventDefault();
+    if (!debtFile) {
+      setMessage({ type: 'error', text: 'Please select a debt Excel file.' });
+      return;
+    }
+    setUploadingDebt(true);
+    setMessage(null);
+    const fd = new FormData();
+    fd.append('debt_file', debtFile);
+    if (debtWeek) fd.append('week_date', debtWeek);
+    try {
+      const res  = await fetch('/api/upload/debt', { method: 'POST', body: fd });
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+      setMessage({
+        type: 'success',
+        text: `Debt uploaded: ${data.imported} SEs | Week: ${data.week} | Total: ₦${Number(data.total_debt).toLocaleString()}${data.skipped > 0 ? ` (${data.skipped} skipped)` : ''}`,
+      });
+      setUploadOpen(false);
+      loadData(date, selectedRange);
+    } catch (err) {
+      setMessage({ type: 'error', text: err.message });
+    }
+    setUploadingDebt(false);
   }
 
   async function handleCoach() {
@@ -88,204 +142,421 @@ export default function Dashboard() {
       const data = await res.json();
       if (data.error) throw new Error(data.error);
       setMessage({ type: 'success', text: `Coaching generated for ${data.count} SEs` });
-      loadData(date);
+      loadData(date, selectedRange);
     } catch (err) {
       setMessage({ type: 'error', text: err.message });
     }
     setCoaching(false);
   }
 
-  // Use analytics-enriched SE list if available, else fall back to raw reports
-  const enrichedSEs = analytics?.ses || [];
-  const rawFullSEs  = reports.filter(r => r.status !== 'trial');
+  const enrichedSEs  = analytics?.ses || [];
+  const rawFullSEs   = reports.filter(r => r.status !== 'trial');
   const hasAnalytics = enrichedSEs.length > 0;
-
-  // Build zone groups sorted by ZONE_ORDER
-  const allSEs = hasAnalytics ? enrichedSEs : reports;
-  const zoneGroups = buildZoneGroups(allSEs, filterStatus, hasAnalytics);
-
+  const allSEs       = hasAnalytics ? enrichedSEs : reports;
+  const zoneGroups   = buildZoneGroups(allSEs, filterStatus, hasAnalytics);
+  const summary      = analytics?.summary;
   const filterOptions = ['all', 'rising', 'at_risk', 'below_expectation', 'watch', 'on_track'];
-  const allFilterable  = hasAnalytics ? enrichedSEs : [];
-
-  const summary = analytics?.summary;
+  const coachingReady = reports.filter(r => r.coaching).length;
+  const coachingPending = reports.filter(r => !r.coaching).length;
 
   return (
     <div>
-      {/* ── Header ─────────────────────────────────────────────── */}
-      <div className="flex items-center justify-between mb-6 gap-3 flex-wrap">
+      {/* ── Top bar ──────────────────────────────────────────────── */}
+      <div className="flex items-center justify-between mb-3 gap-3 flex-wrap">
         <div>
-          <h1 className="text-2xl font-bold text-white">Performance Dashboard</h1>
-          <p className="text-slate-400 text-sm mt-0.5">Track, rank, and coach your field sales team</p>
+          <h1 className="text-xl font-bold text-slate-900">Home</h1>
+          <p className="text-slate-500 text-xs mt-0.5">
+            {summary ? `Latest Report — ${date}` : 'Upload PepUp files to generate a report'}
+          </p>
         </div>
-        <div className="flex items-center gap-2">
-          <input
-            type="date"
-            value={date}
-            onChange={e => setDate(e.target.value)}
-            className="bg-slate-800 border border-slate-600 rounded px-3 py-1.5 text-sm text-white"
-          />
+        <div className="flex items-center gap-2 flex-wrap">
+          <input type="date" value={date} onChange={e => { setDate(e.target.value); setSelectedRange(null); }}
+            className="bg-slate-50 border border-slate-200 rounded px-3 py-1.5 text-sm text-slate-900" />
           {reports.length > 0 && (
-            <button
-              onClick={handleCoach}
-              disabled={coaching}
-              className="bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white text-sm font-medium px-4 py-1.5 rounded transition-colors"
-            >
-              {coaching ? 'Generating…' : 'Generate Coaching'}
+            <button onClick={handleCoach} disabled={coaching}
+              className="bg-red-600 hover:bg-red-500 disabled:opacity-50 text-white text-sm font-medium px-4 py-1.5 rounded transition-colors">
+              {coaching ? 'Generating…' : '⚡ Generate Coaching'}
             </button>
           )}
-          <button
-            onClick={() => setUploadOpen(o => !o)}
-            className="bg-slate-700 hover:bg-slate-600 text-white text-sm font-medium px-4 py-1.5 rounded transition-colors flex items-center gap-1.5"
-          >
-            Upload {uploadOpen ? '▲' : '▼'}
+          <button onClick={() => setUploadOpen(o => !o)}
+            className="bg-slate-50 border border-slate-200 hover:bg-slate-200 text-slate-900 text-sm font-medium px-4 py-1.5 rounded transition-colors">
+            Import Data {uploadOpen ? '▲' : '▼'}
           </button>
         </div>
       </div>
 
-      {/* ── Upload Panel (collapsible) ─────────────────────────── */}
-      {uploadOpen && (
-        <div className="bg-slate-800 border border-slate-700 rounded-lg p-5 mb-6">
-          <h2 className="text-sm font-semibold text-slate-300 mb-4 uppercase tracking-wide">Upload PepUp Files</h2>
-          <form onSubmit={handleUpload}>
-            <div className="grid grid-cols-3 gap-4 mb-4">
-              <FileInput label="Check-in / Check-out"  accept=".xls,.xlsx"
-                onChange={f => setFiles(p => ({ ...p, checkin: f }))} />
-              <FileInput label="Product Report"         accept=".xls,.xlsx"
-                onChange={f => setFiles(p => ({ ...p, product: f }))} />
-              <FileInput label="Feedback Detail Report" accept=".xls,.xlsx"
-                onChange={f => setFiles(p => ({ ...p, feedback: f }))} />
+      {/* ── Date range presets ───────────────────────────────────── */}
+      <div className="flex items-center gap-1.5 mb-6 flex-wrap">
+        <span className="text-xs text-slate-400 mr-1">Range:</span>
+        {DATE_RANGE_PRESETS.map(preset => (
+          <button key={preset.label} onClick={() => handleRangeSelect(preset)}
+            className={`text-xs px-3 py-1 rounded border transition-colors ${
+              selectedRange?.label === preset.label
+                ? 'bg-red-600 text-white border-red-600'
+                : 'bg-slate-50 text-slate-500 border-slate-200 hover:text-slate-900 hover:border-slate-300'
+            }`}>
+            {preset.label}
+          </button>
+        ))}
+        {selectedRange && (
+          <span className="text-xs text-slate-400 ml-1">
+            — {selectedRange.getDays(date)} days ending {date}
+          </span>
+        )}
+      </div>
+
+      {/* ── Two-column body ──────────────────────────────────────── */}
+      <div className="flex gap-6 items-start">
+
+        {/* ── Left: main content ──────────────────────────────────── */}
+        <div className="flex-1 min-w-0">
+
+          {/* Upload Panel */}
+          {uploadOpen && (
+            <div className="bg-slate-50 border border-slate-200 rounded-lg p-5 mb-6">
+              <div className="flex gap-1 mb-4 border-b border-slate-200 pb-3">
+                {[['daily', 'Daily PepUp Files'], ['debt', 'Weekly Debt Sheet']].map(([key, label]) => (
+                  <button key={key} onClick={() => setUploadTab(key)}
+                    className={`text-xs px-3 py-1.5 rounded transition-colors ${uploadTab === key ? 'bg-red-600 text-white' : 'bg-slate-200 text-slate-500 hover:text-slate-900'}`}>
+                    {label}
+                  </button>
+                ))}
+              </div>
+
+              {uploadTab === 'daily' ? (
+                <form onSubmit={handleUpload}>
+                  <div className="grid grid-cols-3 gap-4 mb-4">
+                    <FileInput label="Check-in / Check-out" accept=".xls,.xlsx"
+                      onChange={f => setFiles(p => ({ ...p, checkin: f }))} />
+                    <FileInput label="Product Report" accept=".xls,.xlsx"
+                      onChange={f => setFiles(p => ({ ...p, product: f }))} />
+                    <FileInput label="Feedback Detail Report" accept=".xls,.xlsx"
+                      onChange={f => setFiles(p => ({ ...p, feedback: f }))} />
+                  </div>
+                  <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-900">
+                    <p className="font-semibold mb-1">Debt score is now automatic</p>
+                    <p>
+                      The latest weekly debt upload sets debt score by zone share of total team debt:
+                      full score at 10% or below, and 0 once a zone reaches 25%.
+                    </p>
+                  </div>
+                  <button type="submit" disabled={uploading}
+                    className="bg-red-600 hover:bg-red-500 disabled:opacity-50 text-white text-sm font-medium px-5 py-2 rounded transition-colors">
+                    {uploading ? 'Processing…' : 'Upload & Process'}
+                  </button>
+                </form>
+              ) : (
+                <form onSubmit={handleDebtUpload}>
+                  <p className="text-xs text-slate-500 mb-3">
+                    Format: <span className="text-slate-600 font-medium">Column A</span> = SE Name &nbsp;|&nbsp;
+                    <span className="text-slate-600 font-medium">Column B</span> = Debt Amount (₦) &nbsp;|&nbsp;
+                    <span className="text-slate-600 font-medium">Column C</span> = Week Date (optional)
+                  </p>
+                  <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-900">
+                    <p className="font-semibold mb-1">Debt score rule</p>
+                    <p>
+                      Weekly debt is scored by zone. 10% of total team debt is the safe baseline,
+                      and a zone at 25% or higher gets 0 debt points.
+                    </p>
+                  </div>
+                  <div className="flex gap-4 mb-4 items-end">
+                    <div className="flex-1">
+                      <FileInput label="Debt Excel Sheet" accept=".xls,.xlsx" onChange={f => setDebtFile(f)} />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-slate-500 mb-1">Week Date (optional)</label>
+                      <input type="date" value={debtWeek} onChange={e => setDebtWeek(e.target.value)}
+                        className="bg-slate-200 border border-slate-300 rounded px-3 py-1.5 text-sm text-slate-900" />
+                    </div>
+                  </div>
+                  <button type="submit" disabled={uploadingDebt}
+                    className="bg-orange-600 hover:bg-orange-500 disabled:opacity-50 text-white text-sm font-medium px-5 py-2 rounded transition-colors">
+                    {uploadingDebt ? 'Uploading…' : 'Upload Debt Sheet'}
+                  </button>
+                </form>
+              )}
             </div>
-            {rawFullSEs.length > 0 && (
-              <DebtInputs ses={rawFullSEs} debtScores={debtScores} onChange={setDebtScores} />
+          )}
+
+          {/* Message */}
+          {message && (
+            <div className={`mb-4 px-4 py-3 rounded text-sm ${message.type === 'error' ? 'bg-red-900/50 border border-red-700 text-red-300' : 'bg-green-900/50 border border-green-700 text-green-300'}`}>
+              {message.text}
+            </div>
+          )}
+
+          {/* KPI Cards — range mode overrides single-day */}
+          {rangeData ? (
+            <div className="grid grid-cols-2 xl:grid-cols-4 gap-3 mb-6">
+              <KpiCard label={`Avg Score (${selectedRange.label})`}
+                value={`${rangeData.summary.teamAvgScore}/100`} />
+              <KpiCard label="Reporting Days" value={rangeData.summary.seCount > 0 ? `${rangeData.totalDays}d` : '—'}
+                sub={`${rangeData.summary.seCount} SEs · ${rangeData.summary.avgAttendance}% avg attendance`} />
+              <KpiCard label={`Total Value (${selectedRange.label})`}
+                value={`₦${Number(rangeData.summary.totalValue).toLocaleString()}`} />
+              <KpiCard label={`Total Orders (${selectedRange.label})`}
+                value={Number(rangeData.summary.totalOrders).toLocaleString()} />
+            </div>
+          ) : summary ? (
+            <div className="grid grid-cols-2 xl:grid-cols-4 gap-3 mb-6">
+              <KpiCard label="Team Avg Score" value={`${summary.teamAvgScore}/100`}
+                delta={summary.teamAvgScoreYesterday != null
+                  ? (summary.teamAvgScore - summary.teamAvgScoreYesterday).toFixed(1) : null} />
+              <KpiCard label="Reporting Today" value={summary.reportingCount} />
+              <KpiCard label="Total Value" value={`₦${Number(summary.totalValue).toLocaleString()}`} />
+              <KpiCard
+                label="Outstanding Debt"
+                value={summary.outstandingDebtTotal > 0 ? `₦${Number(summary.outstandingDebtTotal).toLocaleString()}` : '—'}
+                valueColor={summary.outstandingDebtTotal > 0 ? 'text-orange-400' : 'text-slate-400'}
+                sub={summary.outstandingDebtTotal > 0 ? 'Latest weekly upload · zone debt drives debt score' : 'Upload debt sheet to track'}
+              />
+            </div>
+          ) : null}
+
+          {/* ── Range cumulative table ── */}
+          {rangeData && rangeData.ses.length > 0 && (
+            <div>
+              <div className="flex items-center gap-2 mb-3 flex-wrap">
+                <span className="text-xs font-semibold text-slate-600 uppercase tracking-wider">
+                  Cumulative — {selectedRange.label}
+                </span>
+                <span className="text-[10px] text-slate-400">
+                  {selectedRange.getStartDate(date)} → {date} · {rangeData.totalDays} reporting days
+                </span>
+                <div className="flex rounded overflow-hidden border border-slate-200 ml-auto">
+                  <button onClick={() => setRangeView('zone')}
+                    className={`text-xs px-3 py-1 transition-colors ${rangeView === 'zone' ? 'bg-red-600 text-white' : 'bg-slate-50 text-slate-500 hover:text-slate-900'}`}>
+                    By Zone
+                  </button>
+                  <button onClick={() => setRangeView('list')}
+                    className={`text-xs px-3 py-1 border-l border-slate-200 transition-colors ${rangeView === 'list' ? 'bg-red-600 text-white' : 'bg-slate-50 text-slate-500 hover:text-slate-900'}`}>
+                    Ranked List
+                  </button>
+                </div>
+              </div>
+              {rangeView === 'zone'
+                ? <RangeTable rows={rangeData.ses} />
+                : <RangeRankedList rows={rangeData.ses} />
+              }
+            </div>
+          )}
+
+          {/* View Toggle + Filter (single-day, only shown when no range) */}
+          {!rangeData && reports.length > 0 && (
+            <div className="flex items-center gap-2 mb-5 flex-wrap">
+              <div className="flex rounded overflow-hidden border border-slate-200 mr-2">
+                <button onClick={() => setTableView('zone')}
+                  className={`text-xs px-3 py-1.5 transition-colors ${tableView === 'zone' ? 'bg-red-600 text-white' : 'bg-slate-50 text-slate-500 hover:text-slate-900'}`}>
+                  By Zone
+                </button>
+                <button onClick={() => setTableView('list')}
+                  className={`text-xs px-3 py-1.5 border-l border-slate-200 transition-colors ${tableView === 'list' ? 'bg-red-600 text-white' : 'bg-slate-50 text-slate-500 hover:text-slate-900'}`}>
+                  Ranked List
+                </button>
+              </div>
+              {filterOptions.map(f => (
+                <button key={f} onClick={() => setFilterStatus(f)}
+                  className={`text-xs px-3 py-1 rounded transition-colors ${filterStatus === f ? 'bg-red-600 text-white' : 'bg-slate-50 text-slate-500 hover:text-slate-900 border border-slate-200'}`}>
+                  {f === 'all' ? 'All' : (STATUS_META[f]?.label || f)}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {/* Zone Tables (single-day) */}
+          {!rangeData && reports.length > 0 && tableView === 'zone' && (
+            <div className="space-y-8">
+              {zoneGroups.map(zone => (
+                <ZoneSection key={zone.name} zone={zone} hasAnalytics={hasAnalytics} />
+              ))}
+            </div>
+          )}
+
+          {/* Ranked List (single-day) */}
+          {!rangeData && reports.length > 0 && tableView === 'list' && (() => {
+            const allRanked = [...allSEs].sort((a, b) => (a.rank || 99) - (b.rank || 99));
+            const filtered  = hasAnalytics && filterStatus !== 'all'
+              ? allRanked.filter(s => s.status === filterStatus) : allRanked;
+            return <TrackingTable rows={filtered} hasAnalytics={hasAnalytics} showZone />;
+          })()}
+
+          {loading && <p className="text-slate-400 text-sm mt-4">Loading…</p>}
+          {!loading && reports.length === 0 && !rangeData && (
+            <div className="text-center py-16 border border-dashed border-slate-200 rounded-lg mt-4">
+              <p className="text-slate-500 font-medium mb-1">No report for {date}</p>
+              <p className="text-slate-400 text-xs">Click <strong className="text-slate-500">Import Data</strong> above to upload today&apos;s PepUp exports.</p>
+            </div>
+          )}
+
+
+        </div>
+        {/* end left column */}
+
+        {/* ── Right: summary panel ────────────────────────────────── */}
+        <aside className="w-72 flex-shrink-0 space-y-4 hidden xl:block">
+
+          {/* Summary card — range or single day */}
+          <div className="bg-white border border-slate-200 rounded-lg p-5">
+            {rangeData ? (
+              <>
+                <p className="text-slate-500 text-[10px] uppercase tracking-widest mb-1">
+                  {selectedRange.label} Range
+                </p>
+                <p className="text-slate-900 font-bold text-base leading-tight">
+                  {selectedRange.getStartDate(date)} → {date}
+                </p>
+                <p className="text-slate-400 text-xs mt-0.5">{rangeData.totalDays} reporting days</p>
+                <div className="mt-4 grid grid-cols-2 gap-3">
+                  <div>
+                    <p className="text-slate-500 text-[10px] uppercase tracking-wide">Total Revenue</p>
+                    <p className="text-red-400 font-bold text-sm mt-0.5">
+                      ₦{Number(rangeData.summary.totalValue / 1_000_000).toFixed(2)}M
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-slate-500 text-[10px] uppercase tracking-wide">Total Orders</p>
+                    <p className="text-slate-900 font-bold text-sm mt-0.5">
+                      {rangeData.summary.totalOrders.toLocaleString()}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-slate-500 text-[10px] uppercase tracking-wide">Avg Score</p>
+                    <p className="text-slate-900 font-bold text-sm mt-0.5">{rangeData.summary.teamAvgScore}</p>
+                  </div>
+                  <div>
+                    <p className="text-slate-500 text-[10px] uppercase tracking-wide">Avg Attend.</p>
+                    <p className="text-slate-900 font-bold text-sm mt-0.5">{rangeData.summary.avgAttendance}%</p>
+                  </div>
+                </div>
+              </>
+            ) : (
+              <>
+                <p className="text-slate-500 text-[10px] uppercase tracking-widest mb-1">Latest Report</p>
+                <p className="text-slate-900 font-bold text-base leading-tight">{formatDateDisplay(date)}</p>
+                <p className="text-slate-400 text-xs mt-0.5">{date}</p>
+
+                {summary ? (
+                  <>
+                    <div className="mt-4 grid grid-cols-3 gap-3">
+                      <div>
+                        <p className="text-slate-500 text-[10px] uppercase tracking-wide">Revenue</p>
+                        <p className="text-red-400 font-bold text-sm mt-0.5">
+                          ₦{Number(summary.totalValue / 1_000_000).toFixed(2)}M
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-slate-500 text-[10px] uppercase tracking-wide">Score</p>
+                        <p className="text-slate-900 font-bold text-sm mt-0.5">{summary.teamAvgScore}</p>
+                      </div>
+                      <div>
+                        <p className="text-slate-500 text-[10px] uppercase tracking-wide">SEs</p>
+                        <p className="text-slate-900 font-bold text-sm mt-0.5">{summary.reportingCount}</p>
+                      </div>
+                    </div>
+                    <div className="mt-4 flex gap-2">
+                      <button onClick={() => setTableView('zone')}
+                        className="flex-1 bg-red-600 hover:bg-red-500 text-white text-xs font-medium py-1.5 rounded transition-colors">
+                        By Zone
+                      </button>
+                      <button onClick={() => setTableView('list')}
+                        className="flex-1 bg-slate-200 hover:bg-slate-300 text-slate-900 text-xs font-medium py-1.5 rounded transition-colors">
+                        Ranked List
+                      </button>
+                    </div>
+                  </>
+                ) : (
+                  <p className="text-slate-400 text-xs mt-3">No data for this date.</p>
+                )}
+              </>
             )}
-            <button
-              type="submit"
-              disabled={uploading}
-              className="bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-sm font-medium px-5 py-2 rounded transition-colors"
-            >
-              {uploading ? 'Processing…' : 'Upload & Process'}
-            </button>
-          </form>
-        </div>
-      )}
-
-      {/* ── Message ───────────────────────────────────────────── */}
-      {message && (
-        <div className={`mb-4 px-4 py-3 rounded text-sm ${
-          message.type === 'error'
-            ? 'bg-red-900/50 border border-red-700 text-red-300'
-            : 'bg-green-900/50 border border-green-700 text-green-300'
-        }`}>
-          {message.text}
-        </div>
-      )}
-
-      {/* ── KPI Summary Cards ──────────────────────────────────── */}
-      {summary && (
-        <div className="grid grid-cols-5 gap-3 mb-6">
-          <KpiCard
-            label="Team Avg Score"
-            value={`${summary.teamAvgScore}/100`}
-            delta={summary.teamAvgScoreYesterday != null
-              ? (summary.teamAvgScore - summary.teamAvgScoreYesterday).toFixed(1)
-              : null}
-          />
-          <KpiCard label="Reporting Today" value={summary.reportingCount} />
-          <KpiCard label="Total Value" value={`₦${Number(summary.totalValue).toLocaleString()}`} />
-          <KpiCard
-            label="At Risk"
-            value={summary.atRiskCount}
-            valueColor={summary.atRiskCount > 0 ? 'text-red-400' : 'text-slate-300'}
-            sub={summary.decliningCount > 0 ? `+${summary.decliningCount} watching` : null}
-          />
-          <KpiCard
-            label="Rising"
-            value={summary.risingCount}
-            valueColor={summary.risingCount > 0 ? 'text-green-400' : 'text-slate-300'}
-          />
-        </div>
-      )}
-
-      {/* ── View Toggle + Filter Tabs ──────────────────────────── */}
-      {reports.length > 0 && (
-        <div className="flex items-center gap-2 mb-5 flex-wrap">
-          {/* View toggle */}
-          <div className="flex rounded overflow-hidden border border-slate-700 mr-2">
-            <button
-              onClick={() => setTableView('zone')}
-              className={`text-xs px-3 py-1.5 transition-colors ${
-                tableView === 'zone' ? 'bg-blue-600 text-white' : 'bg-slate-800 text-slate-400 hover:text-white'
-              }`}
-            >
-              By Zone
-            </button>
-            <button
-              onClick={() => setTableView('list')}
-              className={`text-xs px-3 py-1.5 transition-colors border-l border-slate-700 ${
-                tableView === 'list' ? 'bg-blue-600 text-white' : 'bg-slate-800 text-slate-400 hover:text-white'
-              }`}
-            >
-              Ranked List
-            </button>
           </div>
 
-          {/* Status filter chips */}
-          {filterOptions.map(f => (
-            <button
-              key={f}
-              onClick={() => setFilterStatus(f)}
-              className={`text-xs px-3 py-1 rounded transition-colors ${
-                filterStatus === f
-                  ? 'bg-blue-600 text-white'
-                  : 'bg-slate-800 text-slate-400 hover:text-white border border-slate-700'
-              }`}
-            >
-              {f === 'all' ? 'All' : (STATUS_META[f]?.label || f)}
-              {f !== 'all' && hasAnalytics && (() => {
-                const cnt = allFilterable.filter(s => s.status === f).length;
-                return cnt > 0 ? <span className="ml-1 opacity-70">({cnt})</span> : null;
-              })()}
-            </button>
-          ))}
-        </div>
-      )}
+          {/* Coaching status */}
+          {reports.length > 0 && (
+            <div className="bg-white border border-slate-200 rounded-lg p-5">
+              <div className="flex items-center justify-between mb-3">
+                <p className="text-slate-500 text-[10px] uppercase tracking-widest">Coaching Status</p>
+                {coachingPending > 0 && (
+                  <span className="bg-orange-500/20 text-orange-400 text-[10px] font-semibold px-2 py-0.5 rounded-full">
+                    {coachingPending} pending
+                  </span>
+                )}
+              </div>
+              <div className="space-y-2">
+                <div className="flex justify-between items-center">
+                  <span className="text-xs text-slate-400">Ready</span>
+                  <span className="text-xs font-semibold text-green-400">{coachingReady}</span>
+                </div>
+                <div className="w-full bg-slate-200 rounded-full h-1.5">
+                  <div
+                    className="bg-green-500 h-1.5 rounded-full transition-all"
+                    style={{ width: reports.length > 0 ? `${(coachingReady / reports.length) * 100}%` : '0%' }}
+                  />
+                </div>
+                <p className="text-[10px] text-slate-400">{coachingReady} of {reports.length} SEs coached</p>
+              </div>
+              {coachingPending > 0 && (
+                <button onClick={handleCoach} disabled={coaching}
+                  className="mt-3 w-full bg-red-600 hover:bg-red-500 disabled:opacity-50 text-white text-xs font-medium py-1.5 rounded transition-colors">
+                  {coaching ? 'Generating…' : 'Generate Now'}
+                </button>
+              )}
+            </div>
+          )}
 
-      {/* ── Zone Tables ────────────────────────────────────────── */}
-      {reports.length > 0 && tableView === 'zone' && (
-        <div className="space-y-8">
-          {zoneGroups.map(zone => (
-            <ZoneSection key={zone.name} zone={zone} hasAnalytics={hasAnalytics} />
-          ))}
-        </div>
-      )}
+          {/* Zone debt summary */}
+          {summary?.debtByZone && Object.keys(summary.debtByZone).length > 0 && (
+            <div className="bg-white border border-slate-200 rounded-lg p-5">
+              <p className="text-slate-500 text-[10px] uppercase tracking-widest mb-1">Debt by Zone</p>
+              <p className="text-[10px] text-slate-400 mb-3">
+                Shared regions are split across matching SEs before zone totals are added.
+              </p>
+              <div className="space-y-2">
+                {Object.entries(summary.debtByZone).sort((a, b) => b[1] - a[1]).map(([zone, amt]) => (
+                  <div key={zone} className="flex justify-between items-center">
+                    <span className="text-xs text-slate-400">{zone}</span>
+                    <span className="text-xs font-semibold text-orange-400">₦{Number(amt).toLocaleString()}</span>
+                  </div>
+                ))}
+                <div className="border-t border-slate-200 pt-2 flex justify-between items-center">
+                  <span className="text-xs text-slate-600 font-medium">Total</span>
+                  <span className="text-xs font-bold text-orange-300">
+                    ₦{Number(summary.outstandingDebtTotal).toLocaleString()}
+                  </span>
+                </div>
+              </div>
+            </div>
+          )}
 
-      {/* ── Full Ranked List ───────────────────────────────────── */}
-      {reports.length > 0 && tableView === 'list' && (() => {
-        const allRanked = [...allSEs].sort((a, b) => (a.rank || 99) - (b.rank || 99));
-        const filtered  = hasAnalytics && filterStatus !== 'all'
-          ? allRanked.filter(s => s.status === filterStatus)
-          : allRanked;
-        return (
-          <div>
-            <TrackingTable rows={filtered} hasAnalytics={hasAnalytics} showZone />
-          </div>
-        );
-      })()}
+          {/* Quick import shortcut */}
+          {!summary && (
+            <div className="bg-slate-100/50 border border-dashed border-slate-200 rounded-lg p-5 text-center">
+              <p className="text-slate-500 text-xs mb-3">No data yet for this date</p>
+              <button onClick={() => setUploadOpen(true)}
+                className="bg-red-600 hover:bg-red-500 text-white text-xs font-medium px-4 py-1.5 rounded transition-colors">
+                Import Data
+              </button>
+            </div>
+          )}
 
-      {loading && <p className="text-slate-400 text-sm mt-4">Loading…</p>}
-      {!loading && reports.length === 0 && (
-        <p className="text-slate-500 text-sm mt-4">
-          No data for {date}. Click <strong>Upload ▼</strong> to add today's PepUp exports.
-        </p>
-      )}
+        </aside>
+        {/* end right panel */}
+
+      </div>
+      {/* end two-column body */}
+
     </div>
   );
 }
 
-/**
- * Group SEs by zone, apply status filter, sort zones by ZONE_ORDER.
- * Within each zone, SEs are sorted: senior_se first, then by rank.
- */
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+function formatDateDisplay(dateStr) {
+  if (!dateStr) return '';
+  const d = new Date(dateStr + 'T00:00:00');
+  return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+}
+
 function buildZoneGroups(ses, filterStatus, hasAnalytics) {
   const zoneMap = {};
   ses.forEach(se => {
@@ -293,118 +564,48 @@ function buildZoneGroups(ses, filterStatus, hasAnalytics) {
     if (!zoneMap[zone]) zoneMap[zone] = [];
     zoneMap[zone].push(se);
   });
-
   return Object.entries(zoneMap)
     .map(([name, zoneSEs]) => {
-      // Sort: senior_se/corporate_se first, then by rank
       const sorted = [...zoneSEs].sort((a, b) => {
-        const aIsSenior = a.positionKey === 'senior_se' || a.positionKey === 'corporate_se';
-        const bIsSenior = b.positionKey === 'senior_se' || b.positionKey === 'corporate_se';
-        if (aIsSenior && !bIsSenior) return -1;
-        if (!aIsSenior && bIsSenior) return 1;
+        const aS = a.positionKey === 'senior_se' || a.positionKey === 'corporate_se';
+        const bS = b.positionKey === 'senior_se' || b.positionKey === 'corporate_se';
+        if (aS && !bS) return -1;
+        if (!aS && bS) return 1;
         return (a.rank || 99) - (b.rank || 99);
       });
-
-      // Apply filter (only if analytics active; otherwise show all)
-      const filtered = hasAnalytics && filterStatus !== 'all'
-        ? sorted.filter(s => s.status === filterStatus)
-        : sorted;
-
+      const filtered   = hasAnalytics && filterStatus !== 'all'
+        ? sorted.filter(s => s.status === filterStatus) : sorted;
       const fullInZone = zoneSEs.filter(s => s.isFullSE !== false && s.status !== 'trial');
-      const avgScore = fullInZone.length
+      const avgScore   = fullInZone.length
         ? Math.round((fullInZone.reduce((s, e) => s + (e.total_score || 0), 0) / fullInZone.length) * 10) / 10
         : null;
       const totalValue = zoneSEs.reduce((s, e) => s + (e.value_of_orders || 0), 0);
-
-      return { name, ses: filtered, allSEs: sorted, avgScore, totalValue };
+      return { name, ses: filtered, avgScore, totalValue };
     })
     .filter(z => z.ses.length > 0)
     .sort((a, b) => {
-      const ai = ZONE_ORDER.indexOf(a.name);
-      const bi = ZONE_ORDER.indexOf(b.name);
+      const ai = ZONE_ORDER.indexOf(a.name), bi = ZONE_ORDER.indexOf(b.name);
       return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi);
     });
 }
 
-// ── Zone Section ─────────────────────────────────────────────────────
-
 function ZoneSection({ zone, hasAnalytics }) {
   return (
     <div>
-      {/* Zone header */}
-      <div className="flex items-center gap-3 mb-3 pb-2 border-b border-slate-700">
-        <h3 className="font-semibold text-white text-sm uppercase tracking-wider">{zone.name}</h3>
+      <div className="flex items-center gap-3 mb-3 pb-2 border-b border-slate-200">
+        <h3 className="font-semibold text-slate-900 text-sm uppercase tracking-wider">{zone.name}</h3>
         {zone.avgScore != null && (
-          <span className={`text-xs px-2 py-0.5 rounded font-medium ${
-            zone.avgScore >= 75 ? 'bg-green-900/50 text-green-300'
-            : zone.avgScore >= 50 ? 'bg-yellow-900/50 text-yellow-300'
-            : 'bg-red-900/50 text-red-300'
-          }`}>
+          <span className={`text-xs px-2 py-0.5 rounded font-medium ${zone.avgScore >= 75 ? 'bg-green-900/50 text-green-300' : zone.avgScore >= 50 ? 'bg-yellow-900/50 text-yellow-300' : 'bg-red-900/50 text-red-300'}`}>
             Avg {zone.avgScore}
           </span>
         )}
-        {zone.totalValue > 0 && (
-          <span className="text-xs text-slate-500">
-            ₦{Number(zone.totalValue).toLocaleString()}
-          </span>
-        )}
-        <span className="text-xs text-slate-600 ml-auto">{zone.ses.length} SE{zone.ses.length !== 1 ? 's' : ''}</span>
+        {zone.totalValue > 0 && <span className="text-xs text-slate-500">₦{Number(zone.totalValue).toLocaleString()}</span>}
+        <span className="text-xs text-slate-400 ml-auto">{zone.ses.length} SE{zone.ses.length !== 1 ? 's' : ''}</span>
       </div>
-
+      <p className="text-[10px] text-slate-400 mb-2">
+        Debt amounts below are allocated shares where regions are owned by more than one SE.
+      </p>
       <TrackingTable rows={zone.ses} hasAnalytics={hasAnalytics} />
-    </div>
-  );
-}
-
-// ── Sub-components ──────────────────────────────────────────────────
-
-function KpiCard({ label, value, delta, valueColor = 'text-white', sub }) {
-  return (
-    <div className="bg-slate-800 border border-slate-700 rounded-lg p-4">
-      <p className="text-slate-400 text-xs uppercase tracking-wide mb-1">{label}</p>
-      <p className={`text-2xl font-bold ${valueColor}`}>{value}</p>
-      {delta != null && (
-        <p className={`text-xs mt-0.5 ${Number(delta) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-          {Number(delta) >= 0 ? '↑' : '↓'} {Math.abs(delta)} vs yesterday
-        </p>
-      )}
-      {sub && <p className="text-xs text-slate-500 mt-0.5">{sub}</p>}
-    </div>
-  );
-}
-
-function FileInput({ label, accept, onChange }) {
-  return (
-    <label className="block">
-      <span className="text-xs text-slate-400 mb-1 block">{label}</span>
-      <input
-        type="file"
-        accept={accept}
-        onChange={e => onChange(e.target.files[0] || null)}
-        className="w-full text-xs text-slate-300 file:mr-2 file:py-1 file:px-2 file:rounded file:border-0 file:bg-slate-700 file:text-slate-200 hover:file:bg-slate-600 cursor-pointer"
-      />
-    </label>
-  );
-}
-
-function DebtInputs({ ses, debtScores, onChange }) {
-  if (!ses.length) return null;
-  return (
-    <div className="bg-slate-800/50 border border-slate-700 rounded p-3 mb-3">
-      <p className="text-xs text-slate-400 mb-1">Debt Scores (0–30) — pre-filled from last week</p>
-      <div className="flex flex-wrap gap-3">
-        {ses.map(se => (
-          <label key={se.se_name} className="flex items-center gap-1.5 text-xs text-slate-300">
-            <span className="whitespace-nowrap">{se.se_name.split(' ')[0]}:</span>
-            <input
-              type="number" min="0" max="30"
-              value={debtScores[se.se_name] ?? 30}
-              onChange={e => onChange(p => ({ ...p, [se.se_name]: Number(e.target.value) }))}
-              className="w-12 bg-slate-700 border border-slate-600 rounded px-1 py-0.5 text-white text-center"
-            />
-          </label>
-        ))}
-      </div>
     </div>
   );
 }
@@ -414,141 +615,87 @@ function TrackingTable({ rows, hasAnalytics, showZone = false }) {
     <div className="overflow-x-auto">
       <table className="w-full text-sm">
         <thead>
-          <tr className="text-xs text-slate-400 uppercase border-b border-slate-700">
+          <tr className="text-xs text-slate-500 uppercase border-b border-slate-200">
             <th className="text-left py-2 px-3">Rank</th>
             <th className="text-left py-2 px-3">Name</th>
             {showZone && <th className="text-left py-2 px-3">Zone</th>}
-            {hasAnalytics && <th className="text-left py-2 px-3">Status</th>}
-            <th className="text-right py-2 px-3">Score</th>
-            {hasAnalytics && <th className="text-center py-2 px-3">7-Day Trend</th>}
+            <th className="text-right py-2 px-3">Resumption</th>
             <th className="text-right py-2 px-3">Stores</th>
             <th className="text-right py-2 px-3">Brands</th>
+            <th className="text-right py-2 px-3">Orders</th>
             <th className="text-right py-2 px-3">Value (₦)</th>
-            <th className="text-right py-2 px-3">Time</th>
-            {hasAnalytics && <th className="text-center py-2 px-3">Expectations</th>}
-            <th className="text-left py-2 px-3">Coach</th>
+            <th className="text-right py-2 px-3">Avg/Store (₦)</th>
+            <th className="text-right py-2 px-3">Debt (₦)</th>
+            <th className="text-right py-2 px-3">Score</th>
           </tr>
         </thead>
         <tbody>
           {rows.map(r => {
-            const rankDelta  = r.rankDeltaVsYesterday;
-            const statusMeta = r.status ? (STATUS_META[r.status] || STATUS_META.on_track) : null;
-            const sparkData  = r.rankHistory ? buildRankSparkline(r.rankHistory, 7) : null;
-            const isSenior   = r.positionKey === 'senior_se' || r.positionKey === 'corporate_se';
+            const rankDelta   = r.rankDeltaVsYesterday;
+            const isSenior    = r.positionKey === 'senior_se' || r.positionKey === 'corporate_se';
+            const avgPerStore = r.stores_visited > 0
+              ? Math.round((r.value_of_orders || 0) / r.stores_visited) : 0;
 
             return (
-              <tr
-                key={r.se_name}
-                className={`border-b border-slate-800 hover:bg-slate-800/50 cursor-pointer ${isSenior ? 'bg-slate-800/20' : ''}`}
-                onClick={() => window.location.href = `/se/${encodeURIComponent(r.se_name)}?date=${r.report_date}`}
-              >
-                {/* Rank + delta */}
+              <tr key={r.se_name}
+                className={`border-b border-slate-200 hover:bg-slate-100/50 cursor-pointer ${isSenior ? 'bg-slate-100/20' : ''}`}
+                onClick={() => window.location.href = `/coach?se=${encodeURIComponent(r.se_name)}`}>
+
                 <td className="py-2.5 px-3">
                   <div className="flex items-center gap-1.5">
-                    <span className="text-slate-300 font-medium">{r.rank || '—'}</span>
+                    <span className="text-slate-600 font-medium">{r.rank || '—'}</span>
                     {rankDelta != null && rankDelta !== 0 && (
                       <span className={`text-xs ${rankDelta > 0 ? 'text-green-400' : 'text-red-400'}`}>
                         {rankDelta > 0 ? `↑${rankDelta}` : `↓${Math.abs(rankDelta)}`}
                       </span>
                     )}
-                    {rankDelta === 0 && <span className="text-xs text-slate-600">—</span>}
                   </div>
                 </td>
 
-                {/* Name + Position */}
                 <td className="py-2.5 px-3 whitespace-nowrap">
-                  <div className={`font-medium ${isSenior ? 'text-white' : 'text-slate-200'}`}>{r.se_name}</div>
+                  <div className={`font-medium ${isSenior ? 'text-slate-900' : 'text-slate-700'}`}>{r.se_name}</div>
                   {r.positionLabel && r.positionLabel !== 'Sales Executive' && (
                     <div className="text-xs text-slate-500">{r.positionLabel}</div>
                   )}
                 </td>
 
-                {/* Zone (ranked list only) */}
-                {showZone && (
-                  <td className="py-2.5 px-3 text-xs text-slate-400 whitespace-nowrap">{r.zone || '—'}</td>
-                )}
+                {showZone && <td className="py-2.5 px-3 text-xs text-slate-500">{r.zone || '—'}</td>}
 
-                {/* Status badge */}
-                {hasAnalytics && (
-                  <td className="py-2.5 px-3">
-                    {statusMeta ? (
-                      <span className={`text-xs px-2 py-0.5 rounded flex items-center gap-1 w-fit ${statusMeta.bg} ${statusMeta.text}`}>
-                        <span className={`w-1.5 h-1.5 rounded-full ${statusMeta.dot}`} />
-                        {statusMeta.label}
-                      </span>
-                    ) : <span className="text-slate-600">—</span>}
-                  </td>
-                )}
+                <td className="py-2.5 px-3 text-right text-slate-600 text-xs">{r.resumption_time || '—'}</td>
 
-                {/* Score */}
-                <td className="py-2.5 px-3 text-right">
-                  <div>
-                    <ScoreBadge score={r.total_score} />
-                    {r.avgScore7d != null && r.avgScore7d !== r.total_score && (
-                      <div className="text-xs text-slate-500">{r.avgScore7d} avg</div>
-                    )}
-                  </div>
-                </td>
-
-                {/* Rank sparkline */}
-                {hasAnalytics && (
-                  <td className="py-2.5 px-3 text-center">
-                    {sparkData ? <RankSparkline data={sparkData} /> : <span className="text-slate-600">—</span>}
-                  </td>
-                )}
-
-                {/* Stores */}
                 <td className="py-2.5 px-3 text-right">
                   <span className={r.expectations && !r.expectations.storesOk ? 'text-orange-400' : 'text-slate-300'}>
                     {r.stores_visited}
                   </span>
                 </td>
 
-                {/* Brands */}
                 <td className="py-2.5 px-3 text-right">
                   <span className={r.expectations && !r.expectations.brandsOk ? 'text-orange-400' : 'text-slate-300'}>
                     {r.brands_ordered}
-                    {r.brandPct != null && <span className="text-xs text-slate-500 ml-1">({r.brandPct}%)</span>}
+                    {r.brandPct != null && <span className="text-xs text-slate-400 ml-1">({r.brandPct}%)</span>}
                   </span>
                 </td>
 
-                {/* Value */}
-                <td className="py-2.5 px-3 text-right text-slate-300">
-                  {Number(r.value_of_orders).toLocaleString()}
+                <td className="py-2.5 px-3 text-right text-slate-600">{r.orders_generated ?? '—'}</td>
+
+                <td className="py-2.5 px-3 text-right text-slate-600">
+                  {Number(r.value_of_orders || 0).toLocaleString()}
                 </td>
 
-                {/* Time */}
-                <td className="py-2.5 px-3 text-right text-slate-400 text-xs">{r.resumption_time || '—'}</td>
-
-                {/* Expectations checkmarks */}
-                {hasAnalytics && (
-                  <td className="py-2.5 px-3 text-center">
-                    {r.expectations && !r.expectations.exempt ? (
-                      <div className="flex gap-1 justify-center text-xs">
-                        <ExpCheck ok={r.expectations.scoreOk}  label="S" />
-                        <ExpCheck ok={r.expectations.brandsOk} label="B" />
-                        <ExpCheck ok={r.expectations.storesOk} label="V" />
-                      </div>
-                    ) : <span className="text-slate-600">—</span>}
-                  </td>
-                )}
-
-                {/* Coaching */}
-                <td className="py-2.5 px-3">
-                  {r.coaching
-                    ? <span className="text-xs text-green-400">Ready</span>
-                    : <span className="text-xs text-slate-500">—</span>
-                  }
+                <td className="py-2.5 px-3 text-right text-slate-500 text-xs">
+                  {r.stores_visited > 0 ? Number(avgPerStore).toLocaleString() : '—'}
                 </td>
+
+                <td className={"py-2.5 px-3 text-right text-xs " + (r.debt_amount > 0 ? "text-orange-400 font-medium" : "text-slate-400")}>
+                  {r.debt_amount > 0 ? "₦" + Number(r.debt_amount).toLocaleString() : "—"}
+                </td>
+
+                <td className="py-2.5 px-3 text-right"><ScoreBadge score={r.total_score} /></td>
               </tr>
             );
           })}
           {rows.length === 0 && (
-            <tr>
-              <td colSpan={11} className="py-6 text-center text-slate-500 text-sm">
-                No SEs match this filter.
-              </td>
-            </tr>
+            <tr><td colSpan={showZone ? 11 : 10} className="py-6 text-center text-slate-400 text-sm">No SEs match this filter.</td></tr>
           )}
         </tbody>
       </table>
@@ -556,59 +703,183 @@ function TrackingTable({ rows, hasAnalytics, showZone = false }) {
   );
 }
 
-function ExpCheck({ ok, label }) {
+function KpiCard({ label, value, delta, valueColor = 'text-slate-900', sub }) {
   return (
-    <span
-      title={label === 'S' ? 'Score' : label === 'B' ? 'Brand %' : 'Stores visited'}
-      className={`w-5 h-5 rounded flex items-center justify-center ${
-        ok ? 'bg-green-900/60 text-green-400' : 'bg-red-900/60 text-red-400'
-      }`}
-    >
-      {ok ? '✓' : '✗'}
-    </span>
+    <div className="bg-white border border-slate-200 rounded-lg p-4">
+      <p className="text-slate-500 text-[10px] uppercase tracking-widest mb-1">{label}</p>
+      <p className={`text-2xl font-bold ${valueColor}`}>{value}</p>
+      {delta != null && (
+        <p className={`text-xs mt-0.5 ${Number(delta) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+          {Number(delta) >= 0 ? '↑' : '↓'} {Math.abs(delta)} vs yesterday
+        </p>
+      )}
+      {sub && <p className="text-xs text-slate-400 mt-0.5">{sub}</p>}
+    </div>
+  );
+}
+
+function FileInput({ label, accept, onChange }) {
+  return (
+    <label className="block">
+      <span className="text-xs text-slate-400 mb-1 block">{label}</span>
+      <input type="file" accept={accept} onChange={e => onChange(e.target.files[0] || null)}
+        className="w-full text-xs text-slate-600 file:mr-2 file:py-1 file:px-2 file:rounded file:border-0 file:bg-slate-200 file:text-slate-700 hover:file:bg-slate-300 cursor-pointer" />
+    </label>
   );
 }
 
 function ScoreBadge({ score }) {
   const s = Number(score) || 0;
-  const color = s >= 75 ? 'text-green-400' : s >= 50 ? 'text-yellow-400' : 'text-red-400';
-  return <span className={`font-bold ${color}`}>{s.toFixed(1)}</span>;
+  return <span className={`font-bold ${s >= 75 ? 'text-green-400' : s >= 50 ? 'text-yellow-400' : 'text-red-400'}`}>{s.toFixed(1)}</span>;
 }
 
-/**
- * Inline SVG sparkline for rank history.
- * Lower rank number = better = higher on chart (Y axis inverted).
- */
-function RankSparkline({ data, width = 56, height = 20, maxRank = 15 }) {
-  const valid = data.filter(d => d != null);
-  if (valid.length < 2) return <span className="text-slate-600 text-xs">—</span>;
-
-  const pts = data.map((rank, i) => {
-    if (rank == null) return null;
-    const x = (i / (data.length - 1)) * width;
-    const y = ((rank - 1) / (maxRank - 1)) * height;
-    return { x, y };
-  }).filter(Boolean);
-
-  const polyline = pts.map(p => `${p.x},${p.y}`).join(' ');
-  const firstRank = valid[0];
-  const lastRank  = valid[valid.length - 1];
-  const color = lastRank < firstRank ? '#4ade80' : lastRank > firstRank ? '#f87171' : '#94a3b8';
+function RangeTable({ rows }) {
+  const byZone = {};
+  for (const r of rows) {
+    const z = r.zone || 'Unassigned';
+    if (!byZone[z]) byZone[z] = [];
+    byZone[z].push(r);
+  }
+  const zones = Object.keys(byZone).sort((a, b) => {
+    const ai = ZONE_ORDER.indexOf(a), bi = ZONE_ORDER.indexOf(b);
+    return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi);
+  });
 
   return (
-    <svg width={width} height={height} className="inline-block">
-      <polyline
-        points={polyline}
-        fill="none"
-        stroke={color}
-        strokeWidth="1.5"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      {pts.map((p, i) => (
-        <circle key={i} cx={p.x} cy={p.y} r="2" fill={color} />
-      ))}
-    </svg>
+    <div className="space-y-6">
+      {zones.map(zone => {
+        const ses = byZone[zone];
+        const zoneTotal = ses.reduce((s, e) => s + e.total_value, 0);
+        const zoneAvgScore = ses.length
+          ? Math.round(ses.reduce((s, e) => s + e.avg_score, 0) / ses.length * 10) / 10 : null;
+        return (
+          <div key={zone}>
+            <div className="flex items-center gap-3 mb-3 pb-2 border-b border-slate-200">
+              <h3 className="font-semibold text-slate-900 text-sm uppercase tracking-wider">{zone}</h3>
+              {zoneAvgScore != null && (
+                <span className={`text-xs px-2 py-0.5 rounded font-medium ${zoneAvgScore >= 75 ? 'bg-green-900/50 text-green-300' : zoneAvgScore >= 50 ? 'bg-yellow-900/50 text-yellow-300' : 'bg-red-900/50 text-red-300'}`}>
+                  Avg {zoneAvgScore}
+                </span>
+              )}
+              <span className="text-xs text-slate-500">₦{Number(zoneTotal).toLocaleString()}</span>
+              <span className="text-xs text-slate-400 ml-auto">{ses.length} SE{ses.length !== 1 ? 's' : ''}</span>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-xs text-slate-500 uppercase border-b border-slate-200">
+                    <th className="text-left py-2 px-3">Rank</th>
+                    <th className="text-left py-2 px-3">Name</th>
+                    <th className="text-right py-2 px-3">Days</th>
+                    <th className="text-right py-2 px-3">Attend%</th>
+                    <th className="text-right py-2 px-3">Stores</th>
+                    <th className="text-right py-2 px-3">Orders</th>
+                    <th className="text-right py-2 px-3">Total Value (₦)</th>
+                    <th className="text-right py-2 px-3">Avg/Day (₦)</th>
+                    <th className="text-right py-2 px-3">Avg/Store (₦)</th>
+                    <th className="text-right py-2 px-3">Debt (₦)</th>
+                    <th className="text-right py-2 px-3">Avg Score</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {ses.map(r => {
+                    const isSenior = r.positionKey === 'senior_se' || r.positionKey === 'corporate_se';
+                    return (
+                      <tr key={r.se_name}
+                        className={`border-b border-slate-200 hover:bg-slate-100/50 cursor-pointer ${isSenior ? 'bg-slate-100/20' : ''}`}
+                        onClick={() => window.location.href = `/coach?se=${encodeURIComponent(r.se_name)}`}>
+                        <td className="py-2.5 px-3 text-slate-600 font-medium">{r.range_rank}</td>
+                        <td className="py-2.5 px-3 whitespace-nowrap">
+                          <div className={`font-medium ${isSenior ? 'text-slate-900' : 'text-slate-700'}`}>{r.se_name}</div>
+                          {r.positionKey && r.positionKey !== 'sales_executive' && (
+                            <div className="text-xs text-slate-500 capitalize">{r.positionKey.replace(/_/g, ' ')}</div>
+                          )}
+                        </td>
+                        <td className="py-2.5 px-3 text-right text-slate-600 text-xs">{r.days_reported}</td>
+                        <td className="py-2.5 px-3 text-right text-xs">
+                          <span className={r.attendance_rate >= 80 ? 'text-green-500' : r.attendance_rate >= 60 ? 'text-yellow-500' : 'text-red-400'}>
+                            {r.attendance_rate}%
+                          </span>
+                        </td>
+                        <td className="py-2.5 px-3 text-right text-slate-600">{r.total_stores.toLocaleString()}</td>
+                        <td className="py-2.5 px-3 text-right text-slate-600">{r.total_orders.toLocaleString()}</td>
+                        <td className="py-2.5 px-3 text-right font-medium text-slate-800">{Number(r.total_value).toLocaleString()}</td>
+                        <td className="py-2.5 px-3 text-right text-slate-500 text-xs">{Number(r.avg_value_per_day).toLocaleString()}</td>
+                        <td className="py-2.5 px-3 text-right text-slate-500 text-xs">{r.avg_value_per_store > 0 ? Number(r.avg_value_per_store).toLocaleString() : '—'}</td>
+                        <td className={"py-2.5 px-3 text-right text-xs " + (r.debt_amount > 0 ? "text-orange-400 font-medium" : "text-slate-400")}>
+                          {r.debt_amount > 0 ? "₦" + Number(r.debt_amount).toLocaleString() : "—"}
+                        </td>
+                        <td className="py-2.5 px-3 text-right"><ScoreBadge score={r.avg_score} /></td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function RangeRankedList({ rows }) {
+  const sorted = [...rows].sort((a, b) => a.range_rank - b.range_rank);
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="text-xs text-slate-500 uppercase border-b border-slate-200">
+            <th className="text-left py-2 px-3">Rank</th>
+            <th className="text-left py-2 px-3">Name</th>
+            <th className="text-left py-2 px-3">Zone</th>
+            <th className="text-right py-2 px-3">Days</th>
+            <th className="text-right py-2 px-3">Attend%</th>
+            <th className="text-right py-2 px-3">Stores</th>
+            <th className="text-right py-2 px-3">Orders</th>
+            <th className="text-right py-2 px-3">Total Value (₦)</th>
+            <th className="text-right py-2 px-3">Avg/Day (₦)</th>
+            <th className="text-right py-2 px-3">Avg/Store (₦)</th>
+            <th className="text-right py-2 px-3">Debt (₦)</th>
+            <th className="text-right py-2 px-3">Avg Score</th>
+          </tr>
+        </thead>
+        <tbody>
+          {sorted.map(r => {
+            const isSenior = r.positionKey === 'senior_se' || r.positionKey === 'corporate_se';
+            return (
+              <tr key={r.se_name}
+                className={`border-b border-slate-200 hover:bg-slate-100/50 cursor-pointer ${isSenior ? 'bg-slate-100/20' : ''}`}
+                onClick={() => window.location.href = `/coach?se=${encodeURIComponent(r.se_name)}`}>
+                <td className="py-2.5 px-3 text-slate-600 font-medium">{r.range_rank}</td>
+                <td className="py-2.5 px-3 whitespace-nowrap">
+                  <div className={`font-medium ${isSenior ? 'text-slate-900' : 'text-slate-700'}`}>{r.se_name}</div>
+                  {r.positionKey && r.positionKey !== 'sales_executive' && (
+                    <div className="text-xs text-slate-500 capitalize">{r.positionKey.replace(/_/g, ' ')}</div>
+                  )}
+                </td>
+                <td className="py-2.5 px-3 text-xs text-slate-500">{r.zone || '—'}</td>
+                <td className="py-2.5 px-3 text-right text-slate-600 text-xs">{r.days_reported}</td>
+                <td className="py-2.5 px-3 text-right text-xs">
+                  <span className={r.attendance_rate >= 80 ? 'text-green-500' : r.attendance_rate >= 60 ? 'text-yellow-500' : 'text-red-400'}>
+                    {r.attendance_rate}%
+                  </span>
+                </td>
+                <td className="py-2.5 px-3 text-right text-slate-600">{r.total_stores.toLocaleString()}</td>
+                <td className="py-2.5 px-3 text-right text-slate-600">{r.total_orders.toLocaleString()}</td>
+                <td className="py-2.5 px-3 text-right font-medium text-slate-800">{Number(r.total_value).toLocaleString()}</td>
+                <td className="py-2.5 px-3 text-right text-slate-500 text-xs">{Number(r.avg_value_per_day).toLocaleString()}</td>
+                <td className="py-2.5 px-3 text-right text-slate-500 text-xs">{r.avg_value_per_store > 0 ? Number(r.avg_value_per_store).toLocaleString() : '—'}</td>
+                <td className={"py-2.5 px-3 text-right text-xs " + (r.debt_amount > 0 ? "text-orange-400 font-medium" : "text-slate-400")}>
+                  {r.debt_amount > 0 ? "₦" + Number(r.debt_amount).toLocaleString() : "—"}
+                </td>
+                <td className="py-2.5 px-3 text-right"><ScoreBadge score={r.avg_score} /></td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
   );
 }
 
@@ -616,4 +887,33 @@ function yesterdayStr() {
   const d = new Date();
   d.setDate(d.getDate() - 1);
   return d.toISOString().split('T')[0];
+}
+
+function shiftDate(dateStr, days) {
+  const d = new Date(dateStr + 'T00:00:00');
+  d.setDate(d.getDate() + days);
+  return d.toISOString().split('T')[0];
+}
+
+function quarterStartStr(dateStr, quarter) {
+  const year = new Date(dateStr + 'T00:00:00').getFullYear();
+  const months = [null, '01', '04', '07', '10'];
+  return `${year}-${months[quarter]}-01`;
+}
+
+function quarterDays(dateStr, quarter) {
+  const end = new Date(dateStr + 'T00:00:00');
+  const year = end.getFullYear();
+  const qStarts = [null, 0, 3, 6, 9]; // month index (0-based)
+  const qStart = new Date(year, qStarts[quarter], 1);
+  const qEnd = new Date(year, qStarts[quarter] + 3, 0); // last day of quarter
+  const effectiveEnd = end < qEnd ? end : qEnd;
+  const diff = Math.max(1, Math.round((effectiveEnd - qStart) / 86400000) + 1);
+  return diff;
+}
+
+function ytdDays(dateStr) {
+  const end = new Date(dateStr + 'T00:00:00');
+  const start = new Date(end.getFullYear(), 0, 1);
+  return Math.max(1, Math.round((end - start) / 86400000) + 1);
 }

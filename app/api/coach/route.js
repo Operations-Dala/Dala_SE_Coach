@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { supabase }     from '@/lib/supabase';
 import { runTeamPipeline } from '@/lib/agents/orchestrator';
+import { AppError, resolveError } from '@/lib/errors';
 
 export async function POST(request) {
   try {
@@ -11,12 +12,9 @@ export async function POST(request) {
     // ── API key ───────────────────────────────────────────────────────────────
     const { data: keyRow } = await supabase
       .from('settings').select('value').eq('key', 'gemini_api_key').maybeSingle();
-    const apiKey = keyRow?.value;
+    const apiKey = process.env.GEMINI_API_KEY || keyRow?.value;
     if (!apiKey) {
-      return NextResponse.json(
-        { error: 'Gemini API key not configured. Go to Settings to add it.' },
-        { status: 400 }
-      );
+      throw new AppError('Gemini API key not configured. Set GEMINI_API_KEY or save it in Settings.', 400);
     }
 
     // ── Load reports ──────────────────────────────────────────────────────────
@@ -26,10 +24,7 @@ export async function POST(request) {
     if (repErr) throw repErr;
 
     if (!reports || reports.length === 0) {
-      return NextResponse.json(
-        { error: `No reports found for ${reportDate}. Upload files first.` },
-        { status: 404 }
-      );
+      throw new AppError(`No reports found for ${reportDate}. Upload files first.`, 404);
     }
 
     // ── Team averages (full SEs only) ─────────────────────────────────────────
@@ -45,11 +40,37 @@ export async function POST(request) {
     };
     const totalSEs = fullReports.length;
 
-    // ── Shared data (brands + roster) ─────────────────────────────────────────
-    const [{ data: brandRows }, { data: rosterRows }] = await Promise.all([
+    // ── Shared data (brands + roster + 14-day feedback trends) ───────────────
+    const twoWeeksAgo    = new Date();
+    twoWeeksAgo.setDate(twoWeeksAgo.getDate() - 14);
+    const twoWeeksAgoStr = twoWeeksAgo.toISOString().split('T')[0];
+
+    const [{ data: brandRows }, { data: rosterRows }, { data: historicalFB }] = await Promise.all([
       supabase.from('brand_partners').select('brand_name').eq('active', 1).eq('deleted', 0),
       supabase.from('team_roster').select('se_name, position, zone, region').eq('deleted', 0),
+      supabase.from('feedback_details')
+        .select('report_date, se_name, brand_name, answer')
+        .gte('report_date', twoWeeksAgoStr)
+        .lt('report_date', reportDate),
     ]);
+
+    // Aggregate brand-level patterns: how many days & SEs reported each brand, with sample answers
+    const brandTrendMap = {};
+    for (const row of historicalFB || []) {
+      if (!row.answer?.trim()) continue;
+      const key = row.brand_name;
+      if (!brandTrendMap[key]) brandTrendMap[key] = { brand_name: key, dates: new Set(), ses: new Set(), samples: [] };
+      brandTrendMap[key].dates.add(row.report_date);
+      brandTrendMap[key].ses.add(row.se_name);
+      if (brandTrendMap[key].samples.length < 5) brandTrendMap[key].samples.push(row.answer.slice(0, 120));
+    }
+    const historicalTrends = Object.values(brandTrendMap).map(t => ({
+      brand_name: t.brand_name,
+      days_seen:  t.dates.size,
+      se_count:   t.ses.size,
+      summary:    t.samples.join(' | '),
+    }));
+
     const activeBrands = (brandRows  || []).map(r => r.brand_name);
     const rosterMap    = Object.fromEntries((rosterRows || []).map(r => [r.se_name, r]));
 
@@ -63,23 +84,28 @@ export async function POST(request) {
 
     // ── Build per-SE pipeline data ─────────────────────────────────────────────
     const seDataArray = await Promise.all(reports.map(async se => {
-      // Coaching history (last 7 days with scores)
-      const { data: coachHistory } = await supabase
-        .from('coaching_history')
-        .select('report_date, coaching_message')
-        .eq('se_name', se.se_name)
-        .lt('report_date', reportDate)
-        .order('report_date', { ascending: false })
-        .limit(7);
-
-      const history = await Promise.all((coachHistory || []).map(async h => {
-        const { data: dr } = await supabase
+      // 7-day metric history — single query with all behavioral metrics (replaces N+1 pattern)
+      const [{ data: historyReports }, { data: coachHistory }] = await Promise.all([
+        supabase
           .from('daily_reports')
-          .select('total_score')
-          .eq('report_date', h.report_date)
+          .select('report_date, total_score, stores_visited, resumption_time, brands_ordered, brand_coverage, value_of_orders, debt_score, time_score, visit_score, brand_score')
           .eq('se_name', se.se_name)
-          .maybeSingle();
-        return { ...h, total_score: dr?.total_score };
+          .lt('report_date', reportDate)
+          .order('report_date', { ascending: false })
+          .limit(7),
+        supabase
+          .from('coaching_history')
+          .select('report_date, coaching_message')
+          .eq('se_name', se.se_name)
+          .lt('report_date', reportDate)
+          .order('report_date', { ascending: false })
+          .limit(7),
+      ]);
+
+      const coachMsgMap = Object.fromEntries((coachHistory || []).map(h => [h.report_date, h.coaching_message]));
+      const history = (historyReports || []).map(h => ({
+        ...h,
+        coaching_message: coachMsgMap[h.report_date] || null,
       }));
 
       // SE trait profile
@@ -122,6 +148,8 @@ export async function POST(request) {
         zoneData, allDebtData: reports,
         traitsText: profile?.traits_text || null,
         activeBrands, feedbackData,
+        feedbackRows: fbRows || [],
+        historicalTrends,
         positionKey, positionLabel, zone, region,
       };
     }));
@@ -146,7 +174,7 @@ export async function POST(request) {
       success: true,
       date:    reportDate,
       count:   results.length,
-      agents:  ['performance', 'behaviour', 'debt', 'resource', 'recorder', 'coach'],
+      agents:  ['performance', 'behaviour', 'debt', 'feedback', 'resource', 'recorder', 'coach'],
       results: results.map((r, i) => ({
         se_name:          reports[i].se_name,
         performance_level: r.analysis?.performance?.performance_level,
@@ -157,8 +185,8 @@ export async function POST(request) {
     });
 
   } catch (err) {
-    console.error('A2A Coach pipeline error:', err);
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    const { message, status } = resolveError(err, 'coach');
+    return NextResponse.json({ error: message }, { status });
   }
 }
 

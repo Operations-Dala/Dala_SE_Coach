@@ -11,6 +11,8 @@ Run: python scripts/import-history.py
 import zipfile
 import xml.etree.ElementTree as ET
 import json
+import os
+from pathlib import Path
 import urllib.request
 import urllib.error
 import urllib.parse
@@ -19,13 +21,28 @@ from datetime import datetime, timedelta
 
 # ── Config ────────────────────────────────────────────────────────────────────
 
-SUPABASE_URL     = 'https://slmjwnjngfbcisudguxw.supabase.co'
-SUPABASE_KEY     = 'SUPABASE_KEY_REMOVED'
-GEMINI_API_KEY   = 'GEMINI_KEY_REMOVED'
+ENV_FILE = Path(__file__).resolve().parents[1] / '.env.local'
+if ENV_FILE.exists():
+    for line in ENV_FILE.read_text(encoding='utf-8').splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith('#') or '=' not in stripped:
+            continue
+        key, value = stripped.split('=', 1)
+        os.environ.setdefault(key.strip(), value.strip())
+
+SUPABASE_URL     = os.environ.get('NEXT_PUBLIC_SUPABASE_URL')
+SUPABASE_KEY     = os.environ.get('SUPABASE_SERVICE_ROLE_KEY')
+GEMINI_API_KEY   = os.environ.get('GEMINI_API_KEY')
 GEMINI_MODEL     = 'gemini-2.5-flash'
 
 COACH_FILE       = 'c:/Users/BIZDEV2/OneDrive/Desktop/Workflow Update/Resources/SE Coach Feedback.xlsx'
 FEEDBACK_FILE    = 'c:/Users/BIZDEV2/OneDrive/Desktop/Workflow Update/Resources/SE Feedback Detailed Report Log.xlsx'
+
+if not SUPABASE_URL or not SUPABASE_KEY or not GEMINI_API_KEY:
+    raise RuntimeError(
+        'Missing NEXT_PUBLIC_SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, or GEMINI_API_KEY. '
+        'Set them in the environment or .env.local before running this script.'
+    )
 
 # ── Name normalisation map (partial/variant → canonical roster name) ──────────
 
