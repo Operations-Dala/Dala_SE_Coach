@@ -32,6 +32,7 @@ export default function Dashboard() {
   const [files, setFiles]             = useState({ checkin: null, product: null, feedback: null });
   const [debtFile, setDebtFile]       = useState(null);
   const [debtWeek, setDebtWeek]       = useState('');
+  const [uploadDate, setUploadDate]   = useState(yesterdayStr());
   const [uploadOpen, setUploadOpen]   = useState(false);
   const [uploadTab, setUploadTab]     = useState('daily');
   const [tableView, setTableView]     = useState('zone');
@@ -90,14 +91,15 @@ export default function Dashboard() {
     fd.append('checkin',  files.checkin);
     fd.append('product',  files.product);
     fd.append('feedback', files.feedback);
-    fd.append('date',     date);
+    fd.append('date',     uploadDate);
     try {
       const res  = await fetch('/api/upload', { method: 'POST', body: fd });
       const data = await res.json();
       if (data.error) throw new Error(data.error);
       setMessage({ type: 'success', text: `Processed ${data.processed} SEs for ${data.date}` });
       setUploadOpen(false);
-      loadData(date, selectedRange);
+      setDate(uploadDate);
+      loadData(uploadDate, selectedRange);
     } catch (err) {
       setMessage({ type: 'error', text: err.message });
     }
@@ -311,6 +313,12 @@ export default function Dashboard() {
 
               {uploadTab === 'daily' ? (
                 <form onSubmit={handleUpload}>
+                  <div className="mb-4 flex items-center gap-3">
+                    <label className="text-xs font-semibold text-slate-600 whitespace-nowrap">Report Date</label>
+                    <input type="date" value={uploadDate} onChange={e => setUploadDate(e.target.value)}
+                      className="bg-white border border-slate-300 rounded px-3 py-1.5 text-sm text-slate-900" />
+                    <span className="text-xs text-slate-400">Uploading for this date will override any existing data for that day.</span>
+                  </div>
                   <div className="grid grid-cols-3 gap-4 mb-4">
                     <FileInput label="Check-in / Check-out" accept=".xls,.xlsx"
                       onChange={f => setFiles(p => ({ ...p, checkin: f }))} />
