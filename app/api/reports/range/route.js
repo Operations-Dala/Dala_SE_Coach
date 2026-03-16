@@ -48,24 +48,29 @@ export async function GET(request) {
     for (const r of (reports || [])) {
       if (!seMap[r.se_name]) {
         seMap[r.se_name] = {
-          se_name:       r.se_name,
-          days_reported: 0,
-          total_value:   0,
-          total_orders:  0,
-          total_stores:  0,
-          total_brands:  0,
-          score_sum:     0,
-          score_count:   0,
-          latest_rank:   null,
-          latest_date:   null,
+          se_name:              r.se_name,
+          days_reported:        0,
+          total_value:          0,
+          total_orders:         0,
+          total_stores:         0,
+          total_brands:         0,
+          score_sum:            0,
+          score_count:          0,
+          total_complete_report: 0,
+          efficiency_sum:       0,
+          efficiency_count:     0,
+          latest_rank:          null,
+          latest_date:          null,
         };
       }
       const s = seMap[r.se_name];
-      s.days_reported += 1;
-      s.total_value   += Number(r.value_of_orders)  || 0;
-      s.total_orders  += Number(r.orders_generated) || 0;
-      s.total_stores  += Number(r.stores_visited)   || 0;
-      s.total_brands  += Number(r.brands_ordered)   || 0;
+      s.days_reported         += 1;
+      s.total_value           += Number(r.value_of_orders)   || 0;
+      s.total_orders          += Number(r.orders_generated)  || 0;
+      s.total_stores          += Number(r.stores_visited)    || 0;
+      s.total_brands          += Number(r.brands_ordered)    || 0;
+      s.total_complete_report += Number(r.complete_report)   || 0;
+      if (r.efficiency_score != null) { s.efficiency_sum += r.efficiency_score; s.efficiency_count += 1; }
       if (r.total_score != null) { s.score_sum += r.total_score; s.score_count += 1; }
       if (!s.latest_date || r.report_date > s.latest_date) {
         s.latest_date = r.report_date;
@@ -84,8 +89,10 @@ export async function GET(request) {
         avg_brands_per_day: s.days_reported > 0 ? Math.round((s.total_brands / s.days_reported) * 10) / 10 : 0,
         avg_score:         s.score_count > 0 ? Math.round((s.score_sum / s.score_count) * 10) / 10 : 0,
         avg_value_per_day: s.days_reported > 0 ? Math.round(s.total_value / s.days_reported) : 0,
-        avg_value_per_store: s.total_stores > 0 ? Math.round(s.total_value / s.total_stores) : 0,
-        latest_rank:       s.latest_rank,
+        avg_value_per_store:    s.total_stores > 0 ? Math.round(s.total_value / s.total_stores) : 0,
+        total_complete_report:  s.total_complete_report,
+        avg_efficiency_score:   s.efficiency_count > 0 ? Math.round((s.efficiency_sum / s.efficiency_count) * 10) / 10 : 0,
+        latest_rank:            s.latest_rank,
         zone:              zoneMap[s.se_name]     || 'Unassigned',
         positionKey:       positionMap[s.se_name] || 'sales_executive',
         rosterStatus:      statusMap[s.se_name]   || 'full',

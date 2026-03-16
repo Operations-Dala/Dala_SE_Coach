@@ -2,6 +2,7 @@
 
 import { Suspense, useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
+import * as XLSX from 'xlsx';
 
 const PERF_META = {
   elite:         { label: 'Elite',         color: 'text-green-600',  bg: 'bg-green-50 border-green-200',  dot: 'bg-green-500'  },
@@ -88,6 +89,27 @@ function CoachPageContent() {
   function getTab(seName) { return activeTab[seName] || 'message'; }
   function setTab(seName, tab) { setActiveTab(prev => ({ ...prev, [seName]: tab })); }
 
+  function handleExportExcel() {
+    const wb = XLSX.utils.book_new();
+    const rows = summaries.map(s => ({
+      Name: s.se_name,
+      Zone: s.zone || '',
+      'Performance Level': s.performance_level || '',
+      'Urgency Level': s.urgency_level || '',
+      Trend: s.score_trend || '',
+      'Debt Status': s.debt_status || '',
+      'Latest Score': s.latest_score ?? '',
+      'Last Coached': s.latest_coach_date || '',
+      'Performance State': s.performance_state || '',
+      Strengths: (s.key_strengths || []).join('; '),
+      'Key Gaps': (s.key_gaps || []).join('; '),
+      'Behavioral Patterns': (s.behavioral_patterns || []).join('; '),
+      'Coaching Message': s.coaching_message || '',
+    }));
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows), 'Coach Summary');
+    XLSX.writeFile(wb, `coach-summary_${new Date().toISOString().slice(0, 10)}.xlsx`);
+  }
+
   async function handleGenerate(seName, date) {
     setGenerating(seName);
     setGenMsg(null);
@@ -155,6 +177,12 @@ function CoachPageContent() {
         <div className="flex items-center gap-3 text-xs text-slate-500">
           <span><span className="font-semibold text-slate-700">{coached}</span> coached</span>
           {uncoached > 0 && <span className="text-orange-500"><span className="font-semibold">{uncoached}</span> pending coaching</span>}
+          {summaries.length > 0 && (
+            <button onClick={handleExportExcel}
+              className="bg-slate-50 border border-slate-200 hover:bg-slate-100 text-slate-700 font-medium px-3 py-1 rounded transition-colors">
+              ↓ Excel
+            </button>
+          )}
         </div>
       </div>
 

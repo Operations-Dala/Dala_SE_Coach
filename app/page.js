@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import * as XLSX from 'xlsx';
 import { STATUS_META } from '@/lib/tier-engine';
 
 const ZONE_ORDER = ['Zone 1', 'Zone 2', 'Zone 3', 'Zone 4', 'All Corporate', 'Trial'];
@@ -149,6 +150,85 @@ export default function Dashboard() {
     setCoaching(false);
   }
 
+  async function handleExportExcel() {
+    const wb = XLSX.utils.book_new();
+
+    // Sheet 1: Ranked List
+    if (rangeData && rangeData.ses.length > 0) {
+      const sorted = [...rangeData.ses].sort((a, b) => a.range_rank - b.range_rank);
+      const rows = sorted.map(r => ({
+        Rank: r.range_rank,
+        Name: r.se_name,
+        Zone: r.zone || '',
+        Position: r.positionKey ? r.positionKey.replace(/_/g, ' ') : 'Sales Executive',
+        'Days Reported': r.days_reported,
+        'Attendance %': r.attendance_rate,
+        'Total Stores': r.total_stores,
+        'Total Orders': r.total_orders,
+        'Total Value (₦)': r.total_value,
+        'Avg Value/Day (₦)': r.avg_value_per_day,
+        'Avg Value/Store (₦)': r.avg_value_per_store || 0,
+        'Total Reports': r.total_complete_report || 0,
+        'Avg Efficiency Score (/15)': r.avg_efficiency_score ?? '',
+        'Debt (₦)': r.debt_amount || 0,
+        'Avg Score': r.avg_score,
+      }));
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows), 'Ranked List');
+    } else if (reports.length > 0) {
+      const allRanked = [...allSEs].sort((a, b) => (a.rank || 99) - (b.rank || 99));
+      const rows = allRanked.map(r => {
+        const avgPerStore = r.stores_visited > 0 ? Math.round((r.value_of_orders || 0) / r.stores_visited) : 0;
+        return {
+          Rank: r.rank || '',
+          Name: r.se_name,
+          Zone: r.zone || '',
+          Position: r.positionLabel || 'Sales Executive',
+          'Resumption Time': r.resumption_time || '',
+          'Stores Visited': r.stores_visited,
+          'Brands Ordered': r.brands_ordered,
+          'Brand Coverage %': r.brandPct ?? '',
+          'Orders Generated': r.orders_generated ?? '',
+          'Value of Orders (₦)': r.value_of_orders || 0,
+          'Avg Value/Store (₦)': avgPerStore,
+          'Complete Reports': r.complete_report ?? '',
+          'Efficiency Score (/15)': r.efficiency_score ?? '',
+          'Debt (₦)': r.debt_amount || 0,
+          Score: r.total_score,
+        };
+      });
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows), 'Ranked List');
+    }
+
+    // Sheet 2: Coach Summary
+    try {
+      const res = await fetch('/api/coach/summaries');
+      const summaries = await res.json();
+      if (Array.isArray(summaries) && summaries.length > 0) {
+        const rows = summaries.map(s => ({
+          Name: s.se_name,
+          Zone: s.zone || '',
+          'Performance Level': s.performance_level || '',
+          'Urgency Level': s.urgency_level || '',
+          Trend: s.score_trend || '',
+          'Debt Status': s.debt_status || '',
+          'Latest Score': s.latest_score ?? '',
+          'Last Coached': s.latest_coach_date || '',
+          'Performance State': s.performance_state || '',
+          Strengths: (s.key_strengths || []).join('; '),
+          'Key Gaps': (s.key_gaps || []).join('; '),
+          'Behavioral Patterns': (s.behavioral_patterns || []).join('; '),
+          'Coaching Message': s.coaching_message || '',
+        }));
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows), 'Coach Summary');
+      }
+    } catch (_) { /* skip coach sheet if unavailable */ }
+
+    const label = rangeData
+      ? `${selectedRange?.label || 'range'}_${date}`
+      : date;
+    XLSX.writeFile(wb, `se-report_${label}.xlsx`);
+  }
+
   const enrichedSEs  = analytics?.ses || [];
   const rawFullSEs   = reports.filter(r => r.status !== 'trial');
   const hasAnalytics = enrichedSEs.length > 0;
@@ -172,6 +252,12 @@ export default function Dashboard() {
         <div className="flex items-center gap-2 flex-wrap">
           <input type="date" value={date} onChange={e => { setDate(e.target.value); setSelectedRange(null); }}
             className="bg-slate-50 border border-slate-200 rounded px-3 py-1.5 text-sm text-slate-900" />
+          {(reports.length > 0 || (rangeData && rangeData.ses.length > 0)) && (
+            <button onClick={handleExportExcel}
+              className="bg-slate-50 border border-slate-200 hover:bg-slate-100 text-slate-700 text-sm font-medium px-4 py-1.5 rounded transition-colors">
+              ↓ Excel
+            </button>
+          )}
           {reports.length > 0 && (
             <button onClick={handleCoach} disabled={coaching}
               className="bg-red-600 hover:bg-red-500 disabled:opacity-50 text-white text-sm font-medium px-4 py-1.5 rounded transition-colors">
@@ -625,6 +711,7 @@ function TrackingTable({ rows, hasAnalytics, showZone = false }) {
             <th className="text-right py-2 px-3">Orders</th>
             <th className="text-right py-2 px-3">Value (₦)</th>
             <th className="text-right py-2 px-3">Avg/Store (₦)</th>
+            <th className="text-right py-2 px-3">Reports</th>
             <th className="text-right py-2 px-3">Debt (₦)</th>
             <th className="text-right py-2 px-3">Score</th>
           </tr>
@@ -635,6 +722,7 @@ function TrackingTable({ rows, hasAnalytics, showZone = false }) {
             const isSenior    = r.positionKey === 'senior_se' || r.positionKey === 'corporate_se';
             const avgPerStore = r.stores_visited > 0
               ? Math.round((r.value_of_orders || 0) / r.stores_visited) : 0;
+            const effScore    = r.efficiency_score ?? null;
 
             return (
               <tr key={r.se_name}
@@ -686,6 +774,19 @@ function TrackingTable({ rows, hasAnalytics, showZone = false }) {
                   {r.stores_visited > 0 ? Number(avgPerStore).toLocaleString() : '—'}
                 </td>
 
+                <td className="py-2.5 px-3 text-right text-xs">
+                  {r.complete_report != null ? (
+                    <div>
+                      <span className="text-slate-600 font-medium">{r.complete_report}</span>
+                      {effScore != null && (
+                        <span className={`ml-1 ${effScore >= 12 ? 'text-green-500' : effScore >= 7.5 ? 'text-yellow-500' : 'text-red-400'}`}>
+                          ({effScore}/15)
+                        </span>
+                      )}
+                    </div>
+                  ) : '—'}
+                </td>
+
                 <td className={"py-2.5 px-3 text-right text-xs " + (r.debt_amount > 0 ? "text-orange-400 font-medium" : "text-slate-400")}>
                   {r.debt_amount > 0 ? "₦" + Number(r.debt_amount).toLocaleString() : "—"}
                 </td>
@@ -695,7 +796,7 @@ function TrackingTable({ rows, hasAnalytics, showZone = false }) {
             );
           })}
           {rows.length === 0 && (
-            <tr><td colSpan={showZone ? 11 : 10} className="py-6 text-center text-slate-400 text-sm">No SEs match this filter.</td></tr>
+            <tr><td colSpan={showZone ? 12 : 11} className="py-6 text-center text-slate-400 text-sm">No SEs match this filter.</td></tr>
           )}
         </tbody>
       </table>
@@ -840,6 +941,7 @@ function RangeRankedList({ rows }) {
             <th className="text-right py-2 px-3">Total Value (₦)</th>
             <th className="text-right py-2 px-3">Avg/Day (₦)</th>
             <th className="text-right py-2 px-3">Avg/Store (₦)</th>
+            <th className="text-right py-2 px-3">Reports</th>
             <th className="text-right py-2 px-3">Debt (₦)</th>
             <th className="text-right py-2 px-3">Avg Score</th>
           </tr>
@@ -870,6 +972,18 @@ function RangeRankedList({ rows }) {
                 <td className="py-2.5 px-3 text-right font-medium text-slate-800">{Number(r.total_value).toLocaleString()}</td>
                 <td className="py-2.5 px-3 text-right text-slate-500 text-xs">{Number(r.avg_value_per_day).toLocaleString()}</td>
                 <td className="py-2.5 px-3 text-right text-slate-500 text-xs">{r.avg_value_per_store > 0 ? Number(r.avg_value_per_store).toLocaleString() : '—'}</td>
+                <td className="py-2.5 px-3 text-right text-xs">
+                  {r.total_complete_report != null ? (
+                    <div>
+                      <span className="text-slate-600 font-medium">{r.total_complete_report}</span>
+                      {r.avg_efficiency_score != null && (
+                        <span className={`ml-1 ${r.avg_efficiency_score >= 12 ? 'text-green-500' : r.avg_efficiency_score >= 7.5 ? 'text-yellow-500' : 'text-red-400'}`}>
+                          ({r.avg_efficiency_score}/15)
+                        </span>
+                      )}
+                    </div>
+                  ) : '—'}
+                </td>
                 <td className={"py-2.5 px-3 text-right text-xs " + (r.debt_amount > 0 ? "text-orange-400 font-medium" : "text-slate-400")}>
                   {r.debt_amount > 0 ? "₦" + Number(r.debt_amount).toLocaleString() : "—"}
                 </td>
