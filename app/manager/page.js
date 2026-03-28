@@ -18,7 +18,15 @@ export default function ManagerPage() {
       .catch(() => setLoading(false));
   }
 
-  useEffect(refresh, []);
+  useEffect(() => {
+    fetch('/api/manager/flags')
+      .then(r => r.json())
+      .then(data => {
+        setFlags(data);
+        setLoading(false);
+      })
+      .catch(() => setLoading(false));
+  }, []);
 
   const expenseFlags = flags?.expense_flags || [];
   const inflowFlags = flags?.inflow_flags || [];

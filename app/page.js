@@ -33,8 +33,14 @@ export default function Dashboard() {
   const [debtFile, setDebtFile]       = useState(null);
   const [debtWeek, setDebtWeek]       = useState('');
   const [uploadDate, setUploadDate]   = useState(yesterdayStr());
-  const [uploadOpen, setUploadOpen]   = useState(false);
-  const [uploadTab, setUploadTab]     = useState('daily');
+  const [uploadOpen, setUploadOpen]     = useState(false);
+  const [uploadTab, setUploadTab]       = useState('daily');
+  const [expenseFile, setExpenseFile]   = useState(null);
+  const [expenseDate, setExpenseDate]   = useState(yesterdayStr());
+  const [uploadingExpense, setUploadingExpense] = useState(false);
+  const [inflowFile, setInflowFile]     = useState(null);
+  const [inflowDate, setInflowDate]     = useState(yesterdayStr());
+  const [uploadingInflow, setUploadingInflow]   = useState(false);
   const [tableView, setTableView]     = useState('zone');
   const [filterStatus, setFilterStatus] = useState('all');
   const [rangeView, setRangeView]     = useState('zone');
@@ -131,6 +137,42 @@ export default function Dashboard() {
       setMessage({ type: 'error', text: err.message });
     }
     setUploadingDebt(false);
+  }
+
+  async function handleExpenseUpload(e) {
+    e.preventDefault();
+    if (!expenseFile) { setMessage({ type: 'error', text: 'Please select an expense file.' }); return; }
+    setUploadingExpense(true);
+    setMessage(null);
+    const fd = new FormData();
+    fd.append('expense_file', expenseFile);
+    fd.append('record_date', expenseDate);
+    try {
+      const res = await fetch('/api/upload/expenses', { method: 'POST', body: fd });
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+      setMessage({ type: 'success', text: `Expenses uploaded: ${data.imported} records | Total: ₦${Number(data.total_amount).toLocaleString()}${data.skipped > 0 ? ` (${data.skipped} skipped)` : ''}` });
+      setUploadOpen(false);
+    } catch (err) { setMessage({ type: 'error', text: err.message }); }
+    setUploadingExpense(false);
+  }
+
+  async function handleInflowUpload(e) {
+    e.preventDefault();
+    if (!inflowFile) { setMessage({ type: 'error', text: 'Please select an inflow file.' }); return; }
+    setUploadingInflow(true);
+    setMessage(null);
+    const fd = new FormData();
+    fd.append('inflow_file', inflowFile);
+    fd.append('record_date', inflowDate);
+    try {
+      const res = await fetch('/api/upload/inflow', { method: 'POST', body: fd });
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+      setMessage({ type: 'success', text: `Inflow uploaded: ${data.imported} records | Total: ₦${Number(data.total_amount).toLocaleString()}${data.skipped > 0 ? ` (${data.skipped} skipped)` : ''}` });
+      setUploadOpen(false);
+    } catch (err) { setMessage({ type: 'error', text: err.message }); }
+    setUploadingInflow(false);
   }
 
   async function handleCoach() {
@@ -303,7 +345,7 @@ export default function Dashboard() {
           {uploadOpen && (
             <div className="bg-slate-50 border border-slate-200 rounded-lg p-5 mb-6">
               <div className="flex gap-1 mb-4 border-b border-slate-200 pb-3">
-                {[['daily', 'Daily PepUp Files'], ['debt', 'Weekly Debt Sheet']].map(([key, label]) => (
+                {[['daily', 'Daily PepUp Files'], ['debt', 'Weekly Debt Sheet'], ['expenses', 'Daily Expenses'], ['inflow', 'Daily Inflow']].map(([key, label]) => (
                   <button key={key} onClick={() => setUploadTab(key)}
                     className={`text-xs px-3 py-1.5 rounded transition-colors ${uploadTab === key ? 'bg-red-600 text-white' : 'bg-slate-200 text-slate-500 hover:text-slate-900'}`}>
                     {label}
@@ -339,7 +381,7 @@ export default function Dashboard() {
                     {uploading ? 'Processing…' : 'Upload & Process'}
                   </button>
                 </form>
-              ) : (
+              ) : uploadTab === 'debt' ? (
                 <form onSubmit={handleDebtUpload}>
                   <p className="text-xs text-slate-500 mb-3">
                     Format: <span className="text-slate-600 font-medium">Column A</span> = SE Name &nbsp;|&nbsp;
@@ -366,6 +408,58 @@ export default function Dashboard() {
                   <button type="submit" disabled={uploadingDebt}
                     className="bg-orange-600 hover:bg-orange-500 disabled:opacity-50 text-white text-sm font-medium px-5 py-2 rounded transition-colors">
                     {uploadingDebt ? 'Uploading…' : 'Upload Debt Sheet'}
+                  </button>
+                </form>
+              ) : uploadTab === 'expenses' ? (
+                <form onSubmit={handleExpenseUpload}>
+                  <p className="text-xs text-slate-500 mb-3">
+                    Format: <span className="text-slate-600 font-medium">Column A</span> = Date &nbsp;|&nbsp;
+                    <span className="text-slate-600 font-medium">Column B</span> = SE Name &nbsp;|&nbsp;
+                    <span className="text-slate-600 font-medium">Column C</span> = Amount (₦)
+                  </p>
+                  <div className="mb-4 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-xs text-blue-900">
+                    <p className="font-semibold mb-1">Expense budget thresholds</p>
+                    <p>Senior SE &amp; Corporate SE: ₦25,000/week. All others: ₦20,000/week. Alerts fire on budget overrun or sudden daily spikes.</p>
+                  </div>
+                  <div className="flex gap-4 mb-4 items-end">
+                    <div className="flex-1">
+                      <FileInput label="Expense Excel Sheet" accept=".xls,.xlsx" onChange={f => setExpenseFile(f)} />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-slate-500 mb-1">Default Date (if sheet has no date col)</label>
+                      <input type="date" value={expenseDate} onChange={e => setExpenseDate(e.target.value)}
+                        className="bg-slate-200 border border-slate-300 rounded px-3 py-1.5 text-sm text-slate-900" />
+                    </div>
+                  </div>
+                  <button type="submit" disabled={uploadingExpense}
+                    className="bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-sm font-medium px-5 py-2 rounded transition-colors">
+                    {uploadingExpense ? 'Uploading…' : 'Upload Expense Sheet'}
+                  </button>
+                </form>
+              ) : (
+                <form onSubmit={handleInflowUpload}>
+                  <p className="text-xs text-slate-500 mb-3">
+                    Format: <span className="text-slate-600 font-medium">Column A</span> = Date &nbsp;|&nbsp;
+                    <span className="text-slate-600 font-medium">Column B</span> = SE Name &nbsp;|&nbsp;
+                    <span className="text-slate-600 font-medium">Column C</span> = Amount (₦)
+                  </p>
+                  <div className="mb-4 rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-xs text-green-900">
+                    <p className="font-semibold mb-1">Inflow tracking</p>
+                    <p>Records actual payments received per SE. Senior SE &amp; Corporate SE are flagged when inflow drops to zero for 2 consecutive days.</p>
+                  </div>
+                  <div className="flex gap-4 mb-4 items-end">
+                    <div className="flex-1">
+                      <FileInput label="Inflow Excel Sheet" accept=".xls,.xlsx" onChange={f => setInflowFile(f)} />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-slate-500 mb-1">Default Date (if sheet has no date col)</label>
+                      <input type="date" value={inflowDate} onChange={e => setInflowDate(e.target.value)}
+                        className="bg-slate-200 border border-slate-300 rounded px-3 py-1.5 text-sm text-slate-900" />
+                    </div>
+                  </div>
+                  <button type="submit" disabled={uploadingInflow}
+                    className="bg-green-600 hover:bg-green-500 disabled:opacity-50 text-white text-sm font-medium px-5 py-2 rounded transition-colors">
+                    {uploadingInflow ? 'Uploading…' : 'Upload Inflow Sheet'}
                   </button>
                 </form>
               )}

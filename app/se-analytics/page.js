@@ -26,11 +26,13 @@ const DATE_RANGE_PRESETS = [
 ];
 
 const SECTIONS = [
-  { key: 'kpi',         label: 'KPI Cards' },
-  { key: 'ordersChart', label: 'Orders & Value' },
-  { key: 'debtChart',   label: 'Debt Trend' },
-  { key: 'brandOrders', label: 'Brand Orders' },
-  { key: 'brandIssues', label: 'Brand Issues' },
+  { key: 'kpi',          label: 'KPI Cards' },
+  { key: 'ordersChart',  label: 'Orders & Value' },
+  { key: 'debtChart',    label: 'Debt Trend' },
+  { key: 'brandOrders',  label: 'Brand Orders' },
+  { key: 'dailyBrands',  label: 'Daily Brands' },
+  { key: 'financial',    label: 'Financial' },
+  { key: 'brandIssues',  label: 'Brand Issues' },
 ];
 
 export default function SEAnalyticsPage() {
@@ -51,6 +53,16 @@ export default function SEAnalyticsPage() {
   const [brandSortBy,       setBrandSortBy]        = useState('count');  // count | alpha
   const [hiddenSections,    setHiddenSections]     = useState(new Set());
 
+  // Financial overview state
+  const [financialData,     setFinancialData]      = useState(null);
+  const [inflowData,        setInflowData]         = useState(null);
+  const [financialLoading,  setFinancialLoading]   = useState(true);
+
+  // Daily brand chart state
+  const [dailyBrandDate,    setDailyBrandDate]     = useState(todayStr());
+  const [dailyBrandData,    setDailyBrandData]     = useState(null);
+  const [dailyBrandLoading, setDailyBrandLoading]  = useState(false);
+
   const days = useMemo(() => selectedRange.getDays(), [selectedRange]);
 
   // Fetch trends when range changes
@@ -61,6 +73,29 @@ export default function SEAnalyticsPage() {
       .then(data => { setTrends(data?.daily ? data : null); setLoading(false); })
       .catch(() => setLoading(false));
   }, [days]);
+
+  // Fetch financial data when range changes
+  useEffect(() => {
+    setFinancialLoading(true);
+    Promise.all([
+      fetch(`/api/analytics/expenses?days=${days}`).then(r => r.json()),
+      fetch(`/api/analytics/inflow?days=${days}`).then(r => r.json()),
+    ]).then(([expData, inflData]) => {
+      setFinancialData(expData?.daily ? expData : null);
+      setInflowData(inflData?.daily ? inflData : null);
+      setFinancialLoading(false);
+    }).catch(() => setFinancialLoading(false));
+  }, [days]);
+
+  // Fetch daily brand data when date changes
+  useEffect(() => {
+    if (!dailyBrandDate) return;
+    setDailyBrandLoading(true);
+    fetch(`/api/analytics/brand-orders/daily?date=${dailyBrandDate}`)
+      .then(r => r.json())
+      .then(data => { setDailyBrandData(data); setDailyBrandLoading(false); })
+      .catch(() => setDailyBrandLoading(false));
+  }, [dailyBrandDate]);
 
   // Fetch brand + roster data when range changes
   useEffect(() => {
@@ -420,6 +455,155 @@ export default function SEAnalyticsPage() {
         </div>
       )}
 
+      {/* ── Daily Brand Chart ────────────────────────────────────────────────── */}
+      {visible('dailyBrands') && (
+        <div className="bg-white border border-slate-200 rounded-lg p-5">
+          <div className="flex items-start justify-between mb-4 flex-wrap gap-2">
+            <div>
+              <p className="text-xs font-semibold text-slate-500 uppercase tracking-widest">
+                Brand Coverage — Single Day
+              </p>
+              <p className="text-[10px] text-slate-400 mt-0.5">
+                How many SEs ordered each brand on the selected date
+              </p>
+            </div>
+            <input type="date" value={dailyBrandDate} onChange={e => setDailyBrandDate(e.target.value)}
+              className="bg-slate-50 border border-slate-200 rounded px-3 py-1.5 text-sm text-slate-900" />
+          </div>
+          {dailyBrandLoading && <p className="text-xs text-slate-400 py-6 text-center">Loading…</p>}
+          {!dailyBrandLoading && dailyBrandData && dailyBrandData.brands?.length > 0 && (
+            <>
+              <p className="text-[10px] text-slate-400 mb-3">
+                {dailyBrandData.date} · {dailyBrandData.total_ses} SE{dailyBrandData.total_ses !== 1 ? 's' : ''} reporting
+              </p>
+              <ResponsiveContainer width="100%" height={Math.max(260, dailyBrandData.brands.length * 32)}>
+                <BarChart data={dailyBrandData.brands} layout="vertical" margin={{ top: 4, right: 20, left: 10, bottom: 4 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#cbd5e1" horizontal={false} />
+                  <XAxis type="number" tick={{ fill: '#64748b', fontSize: 10 }} allowDecimals={false}
+                    domain={[0, dailyBrandData.total_ses || 'auto']} />
+                  <YAxis type="category" dataKey="brand" tick={{ fill: '#64748b', fontSize: 10 }} width={155} />
+                  <Tooltip
+                    contentStyle={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 8, fontSize: 12 }}
+                    formatter={(v, _n, props) => [
+                      `${v} of ${dailyBrandData.total_ses} SEs`,
+                      props.payload?.brand,
+                    ]} />
+                  <Bar dataKey="count" radius={[0, 4, 4, 0]}>
+                    {dailyBrandData.brands.map((entry, i) => (
+                      <Cell key={i} fill={entry.count > 0 ? ZONE_COLORS[i % ZONE_COLORS.length] : '#e2e8f0'} />
+                    ))}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            </>
+          )}
+          {!dailyBrandLoading && (!dailyBrandData || dailyBrandData.brands?.length === 0) && (
+            <p className="text-xs text-slate-400 py-6 text-center">No data for this date.</p>
+          )}
+        </div>
+      )}
+
+      {/* ── Financial Overview ───────────────────────────────────────────────── */}
+      {visible('financial') && !financialLoading && (financialData || inflowData) && (
+        <div className="space-y-4">
+          {/* KPI cards */}
+          <div className="grid grid-cols-2 xl:grid-cols-3 gap-3">
+            <StatCard
+              label={`Team Expenses — This Week`}
+              value={`₦${Number(financialData?.team_weekly_total || 0).toLocaleString()}`}
+              valueColor="text-orange-600"
+            />
+            <StatCard
+              label={`Team Inflow — This Week`}
+              value={`₦${Number(inflowData?.team_weekly_total || 0).toLocaleString()}`}
+              valueColor="text-green-600"
+            />
+            <StatCard
+              label="SEs Over Budget"
+              value={financialData?.over_budget_count ?? 0}
+              valueColor={financialData?.over_budget_count > 0 ? 'text-red-600' : 'text-slate-900'}
+            />
+          </div>
+
+          {/* Expense & Inflow charts */}
+          <div className="grid grid-cols-1 xl:grid-cols-2 gap-5">
+            {financialData?.daily?.length > 0 && (
+              <div className="bg-white border border-slate-200 rounded-lg p-5">
+                <p className="text-xs font-semibold text-slate-500 uppercase tracking-widest mb-4">
+                  Daily Expenses — {selectedRange.label}
+                </p>
+                <ResponsiveContainer width="100%" height={200}>
+                  <AreaChart data={financialData.daily} margin={{ top: 4, right: 10, left: 10, bottom: 4 }}>
+                    <defs>
+                      <linearGradient id="expGrad" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%"  stopColor="#fb923c" stopOpacity={0.2} />
+                        <stop offset="95%" stopColor="#fb923c" stopOpacity={0} />
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#cbd5e1" />
+                    <XAxis dataKey="date" tick={{ fill: '#64748b', fontSize: 10 }} tickFormatter={d => d.slice(5)} />
+                    <YAxis tick={{ fill: '#64748b', fontSize: 10 }} tickFormatter={v => `₦${(v / 1000).toFixed(0)}k`} />
+                    <Tooltip contentStyle={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 8, fontSize: 12 }}
+                      formatter={v => [`₦${Number(v).toLocaleString()}`, 'Team Expenses']} />
+                    <Area type="monotone" dataKey="total" stroke="#fb923c" strokeWidth={2} fill="url(#expGrad)" dot={false} activeDot={{ r: 4 }} />
+                  </AreaChart>
+                </ResponsiveContainer>
+                {financialData.per_se_weekly?.filter(s => s.over_budget).length > 0 && (
+                  <div className="mt-3 border-t border-slate-100 pt-3">
+                    <p className="text-[10px] font-semibold text-red-600 mb-1.5">Over Budget This Week</p>
+                    <div className="space-y-1">
+                      {financialData.per_se_weekly.filter(s => s.over_budget).map(s => (
+                        <div key={s.se_name} className="flex items-center justify-between text-[11px]">
+                          <span className="text-slate-700">{s.se_name} <span className="text-slate-400">({s.zone})</span></span>
+                          <span className="text-red-600 font-medium">₦{Number(s.weekly_total).toLocaleString()} / ₦{Number(s.budget).toLocaleString()}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {inflowData?.daily?.length > 0 && (
+              <div className="bg-white border border-slate-200 rounded-lg p-5">
+                <p className="text-xs font-semibold text-slate-500 uppercase tracking-widest mb-4">
+                  Daily Inflow — {selectedRange.label}
+                </p>
+                <ResponsiveContainer width="100%" height={200}>
+                  <AreaChart data={inflowData.daily} margin={{ top: 4, right: 10, left: 10, bottom: 4 }}>
+                    <defs>
+                      <linearGradient id="inflowGrad" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%"  stopColor="#34d399" stopOpacity={0.2} />
+                        <stop offset="95%" stopColor="#34d399" stopOpacity={0} />
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#cbd5e1" />
+                    <XAxis dataKey="date" tick={{ fill: '#64748b', fontSize: 10 }} tickFormatter={d => d.slice(5)} />
+                    <YAxis tick={{ fill: '#64748b', fontSize: 10 }} tickFormatter={v => `₦${(v / 1000).toFixed(0)}k`} />
+                    <Tooltip contentStyle={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 8, fontSize: 12 }}
+                      formatter={v => [`₦${Number(v).toLocaleString()}`, 'Team Inflow']} />
+                    <Area type="monotone" dataKey="total" stroke="#34d399" strokeWidth={2} fill="url(#inflowGrad)" dot={false} activeDot={{ r: 4 }} />
+                  </AreaChart>
+                </ResponsiveContainer>
+                {inflowData.inflow_alerts?.length > 0 && (
+                  <div className="mt-3 border-t border-slate-100 pt-3">
+                    <p className="text-[10px] font-semibold text-amber-600 mb-1.5">2-Day Zero Inflow Alert</p>
+                    <div className="space-y-1">
+                      {inflowData.inflow_alerts.map(s => (
+                        <div key={s.se_name} className="flex items-center justify-between text-[11px]">
+                          <span className="text-slate-700">{s.se_name} <span className="text-slate-400">({s.zone})</span></span>
+                          <span className="text-amber-600 font-medium">{s.days_zero} days no inflow</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* ── Brand Issues ─────────────────────────────────────────────────────── */}
       {!extraLoading && brandIssueChartData.length > 0 && visible('brandIssues') && (
         <div className="bg-white border border-slate-200 rounded-lg p-5">
@@ -449,6 +633,11 @@ export default function SEAnalyticsPage() {
 
     </div>
   );
+}
+
+/* ── Helpers ────────────────────────────────────────────────────────────────── */
+function todayStr() {
+  return new Date().toISOString().split('T')[0];
 }
 
 /* ── Orders & Value Chart (multi-type) ──────────────────────────────────────── */

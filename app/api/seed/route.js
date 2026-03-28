@@ -49,6 +49,24 @@ CREATE TABLE IF NOT EXISTS feedback_details (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+CREATE TABLE IF NOT EXISTS expense_records (
+  id BIGSERIAL PRIMARY KEY,
+  record_date DATE NOT NULL,
+  se_name TEXT NOT NULL,
+  amount NUMERIC NOT NULL DEFAULT 0,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(record_date, se_name)
+);
+
+CREATE TABLE IF NOT EXISTS inflow_records (
+  id BIGSERIAL PRIMARY KEY,
+  record_date DATE NOT NULL,
+  se_name TEXT NOT NULL,
+  amount NUMERIC NOT NULL DEFAULT 0,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(record_date, se_name)
+);
+
 -- Add position column to team_roster if missing (idempotent migration)
 DO $$ BEGIN
   IF NOT EXISTS (

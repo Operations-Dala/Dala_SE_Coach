@@ -45,14 +45,22 @@ export async function POST(request) {
     twoWeeksAgo.setDate(twoWeeksAgo.getDate() - 14);
     const twoWeeksAgoStr = twoWeeksAgo.toISOString().split('T')[0];
 
-    const [{ data: brandRows }, { data: rosterRows }, { data: historicalFB }] = await Promise.all([
+    const [{ data: brandRows }, { data: rosterRows }, { data: historicalFB }, { data: expenseRows }] = await Promise.all([
       supabase.from('brand_partners').select('brand_name').eq('active', 1).eq('deleted', 0),
       supabase.from('team_roster').select('se_name, position, zone, region').eq('deleted', 0),
       supabase.from('feedback_details')
         .select('report_date, se_name, brand_name, answer')
         .gte('report_date', twoWeeksAgoStr)
         .lt('report_date', reportDate),
+      supabase.from('expense_records').select('se_name, amount').eq('record_date', reportDate),
     ]);
+
+    // Build expense lookup: se_name → daily amount for the report date
+    const expenseMap = {};
+    for (const row of (expenseRows || [])) {
+      expenseMap[row.se_name] = (expenseMap[row.se_name] || 0) + Number(row.amount);
+    }
+    const DAILY_EXPENSE_LIMIT = 4000;
 
     // Aggregate brand-level patterns: how many days & SEs reported each brand, with sample answers
     const brandTrendMap = {};
@@ -143,6 +151,8 @@ export async function POST(request) {
       // Zone-level daily reports (for zone comparison in Performance & Debt agents)
       const zoneData = reportsByZone[zone] || [];
 
+      const dailyExpense = expenseMap[se.se_name] || 0;
+
       return {
         se, history, teamAvg, totalSEs,
         zoneData, allDebtData: reports,
@@ -151,6 +161,8 @@ export async function POST(request) {
         feedbackRows: fbRows || [],
         historicalTrends,
         positionKey, positionLabel, zone, region,
+        dailyExpense,
+        dailyExpenseLimit: DAILY_EXPENSE_LIMIT,
       };
     }));
 
