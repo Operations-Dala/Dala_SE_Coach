@@ -81,7 +81,14 @@ export default function ImportPage() {
     try {
       const res  = await fetch('/api/upload/expenses', { method: 'POST', body: fd });
       const data = await res.json();
-      if (data.error) throw new Error(data.error);
+      if (data.error) {
+        if (data.debug) console.warn('Expense upload debug:', JSON.stringify(data.debug, null, 2));
+        if (data.skipped?.length) console.warn('Skipped names:', data.skipped);
+        const debugHint = data.debug
+          ? ` | Headers found: [${data.debug.detected_headers.join(', ')}] | Skipped: ${data.skipped?.length ?? 0} names | Roster size: ${data.debug.roster_count}`
+          : '';
+        throw new Error(data.error + debugHint);
+      }
       setMessage({ type: 'success', text: `Expenses uploaded: ${data.imported} records | Total: ₦${Number(data.total_amount).toLocaleString()}${data.skipped > 0 ? ` (${data.skipped} skipped)` : ''}` });
       setExpenseFile(null);
     } catch (err) {

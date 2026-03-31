@@ -35,8 +35,21 @@ export async function POST(request) {
     const { records, skipped, format } = parseExpenseUploadRows(rows, rosterRows || [], fallbackDate);
 
     if (records.length === 0) {
+      const headerRow = rows.find(r => Array.isArray(r) && r.some(c => String(c || '').trim()));
+      const sampleHeaders = headerRow ? headerRow.map(c => String(c || '').trim()).filter(Boolean) : [];
+      const sampleRows = rows.slice(1, 4).map(r => (r || []).slice(0, 4).map(c => String(c ?? '')));
       return NextResponse.json(
-        { error: 'No valid records found.', skipped },
+        {
+          error: 'No valid records found.',
+          skipped,
+          debug: {
+            format_detected: format || 'none',
+            total_rows: rows.length,
+            detected_headers: sampleHeaders,
+            sample_data: sampleRows,
+            roster_count: (rosterRows || []).length,
+          },
+        },
         { status: 400 }
       );
     }
