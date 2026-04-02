@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { requireAdminApiSession } from '@/lib/admin-auth';
 import { supabase } from '@/lib/supabase';
 
 /**
@@ -8,6 +9,9 @@ import { supabase } from '@/lib/supabase';
  * If ?se= is provided, returns only that SE's data.
  */
 export async function GET(request) {
+  const unauthorizedResponse = await requireAdminApiSession(request);
+  if (unauthorizedResponse) return unauthorizedResponse;
+
   const { searchParams } = new URL(request.url);
   const date   = searchParams.get('date');
   const seName = searchParams.get('se');

@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { requireAdminApiSession } from '@/lib/admin-auth';
 import { supabase } from '@/lib/supabase';
 
 // Positions that should trigger a 2-day inflow alert
@@ -14,6 +15,11 @@ const SENIOR_POSITIONS = new Set(['senior_se', 'corporate_se']);
  * - inflow_alerts: [{ se_name, position, zone, days_zero }] — senior/corp SEs with 2+ days zero inflow
  */
 export async function GET(request) {
+  const unauthorizedResponse = await requireAdminApiSession(request);
+  if (unauthorizedResponse) {
+    return unauthorizedResponse;
+  }
+
   const { searchParams } = new URL(request.url);
   const days = parseInt(searchParams.get('days') || '7', 10);
 

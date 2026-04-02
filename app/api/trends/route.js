@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { requireAdminApiSession } from '@/lib/admin-auth';
 import { supabase }     from '@/lib/supabase';
 
 /**
@@ -9,6 +10,9 @@ import { supabase }     from '@/lib/supabase';
  *  - debt[]   : { week_date, total_debt, by_zone: {zone: amount} }   — from debt_records
  */
 export async function GET(request) {
+  const unauthorizedResponse = await requireAdminApiSession(request);
+  if (unauthorizedResponse) return unauthorizedResponse;
+
   try {
     const { searchParams } = new URL(request.url);
     const days = Math.min(parseInt(searchParams.get('days') || '30', 10), 90);

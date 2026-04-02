@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { requireAdminApiSession } from '@/lib/admin-auth';
 import { supabase } from '@/lib/supabase';
 import { parseTierConfig, assignTier, calcBrandPct, evaluateStatus, getPosition, POSITIONS } from '@/lib/tier-engine';
 
@@ -10,6 +11,9 @@ import { parseTierConfig, assignTier, calcBrandPct, evaluateStatus, getPosition,
  * - Per-SE data with tier, status, rank history for sparklines
  */
 export async function GET(request) {
+  const unauthorizedResponse = await requireAdminApiSession(request);
+  if (unauthorizedResponse) return unauthorizedResponse;
+
   try {
     const { searchParams } = new URL(request.url);
     const date = searchParams.get('date');

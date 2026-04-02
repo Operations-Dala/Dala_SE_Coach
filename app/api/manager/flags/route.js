@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { requireAdminApiSession } from '@/lib/admin-auth';
 import { supabase } from '@/lib/supabase';
 
 const WEEKLY_BUDGET = { senior_se: 25000, corporate_se: 25000 };
@@ -18,7 +19,12 @@ const SENIOR_POSITIONS = new Set(['senior_se', 'corporate_se']);
  * - inactive_ses: SEs with no data OR zero stores for 2+ consecutive days
  * - financial_rows: merged date + SE inflow/expense rows for recent monitoring
  */
-export async function GET() {
+export async function GET(request) {
+  const unauthorizedResponse = await requireAdminApiSession(request);
+  if (unauthorizedResponse) {
+    return unauthorizedResponse;
+  }
+
   const today = new Date();
 
   // ── Shared: roster ─────────────────────────────────────────────────────────

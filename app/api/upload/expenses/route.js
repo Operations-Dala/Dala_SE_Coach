@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { requireAdminApiSession } from '@/lib/admin-auth';
 import { supabase } from '@/lib/supabase';
 import * as XLSX from 'xlsx';
 import { parseExpenseUploadRows, today } from '@/lib/financial-import';
@@ -13,6 +14,9 @@ import { parseExpenseUploadRows, today } from '@/lib/financial-import';
  * Upserts into expense_records keyed on (record_date, se_name).
  */
 export async function POST(request) {
+  const unauthorizedResponse = await requireAdminApiSession(request);
+  if (unauthorizedResponse) return unauthorizedResponse;
+
   try {
     const formData = await request.formData();
     const file = formData.get('expense_file');

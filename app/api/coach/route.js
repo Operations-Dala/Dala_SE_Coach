@@ -1,9 +1,13 @@
 import { NextResponse } from 'next/server';
+import { requireAdminApiSession } from '@/lib/admin-auth';
 import { supabase }     from '@/lib/supabase';
 import { runTeamPipeline } from '@/lib/agents/orchestrator';
 import { AppError, resolveError } from '@/lib/errors';
 
 export async function POST(request) {
+  const unauthorizedResponse = await requireAdminApiSession(request);
+  if (unauthorizedResponse) return unauthorizedResponse;
+
   try {
     const body       = await request.json();
     const reportDate = body.date    || yesterdayDate();

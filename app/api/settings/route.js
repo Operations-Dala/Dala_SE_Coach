@@ -1,7 +1,11 @@
 import { NextResponse } from 'next/server';
+import { requireAdminApiSession } from '@/lib/admin-auth';
 import { supabase } from '@/lib/supabase';
 
-export async function GET() {
+export async function GET(request) {
+  const unauthorizedResponse = await requireAdminApiSession(request);
+  if (unauthorizedResponse) return unauthorizedResponse;
+
   const { data, error } = await supabase.from('settings').select('key, value');
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
@@ -20,6 +24,9 @@ export async function GET() {
 }
 
 export async function PUT(request) {
+  const unauthorizedResponse = await requireAdminApiSession(request);
+  if (unauthorizedResponse) return unauthorizedResponse;
+
   const body = await request.json();
   const rows = Object.entries(body)
     .filter(([key, value]) => {

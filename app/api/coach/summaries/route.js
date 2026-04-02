@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { requireAdminApiSession } from '@/lib/admin-auth';
 import { supabase } from '@/lib/supabase';
 
 /**
@@ -7,7 +8,10 @@ import { supabase } from '@/lib/supabase';
  * Returns per-SE coaching summaries including latest coaching message, analysis
  * fields, latest score, and urgency state from coach_patterns.
  */
-export async function GET() {
+export async function GET(request) {
+  const unauthorizedResponse = await requireAdminApiSession(request);
+  if (unauthorizedResponse) return unauthorizedResponse;
+
   try {
     const [
       { data: roster,      error: rosterErr },

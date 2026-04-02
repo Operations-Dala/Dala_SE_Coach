@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { requireAdminApiSession } from '@/lib/admin-auth';
 import { supabase } from '@/lib/supabase';
 
 // Weekly budget thresholds by position
@@ -23,6 +24,11 @@ function getBudget(position) {
  * - over_budget_count: number
  */
 export async function GET(request) {
+  const unauthorizedResponse = await requireAdminApiSession(request);
+  if (unauthorizedResponse) {
+    return unauthorizedResponse;
+  }
+
   const { searchParams } = new URL(request.url);
   const days = parseInt(searchParams.get('days') || '7', 10);
 

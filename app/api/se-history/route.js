@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { requireAdminApiSession } from '@/lib/admin-auth';
 import { supabase }     from '@/lib/supabase';
 
 /**
@@ -6,6 +7,9 @@ import { supabase }     from '@/lib/supabase';
  * Returns up to `days` daily_report rows for the SE, ordered date ascending.
  */
 export async function GET(request) {
+  const unauthorizedResponse = await requireAdminApiSession(request);
+  if (unauthorizedResponse) return unauthorizedResponse;
+
   const { searchParams } = new URL(request.url);
   const seName = searchParams.get('se');
   const days   = Math.min(Math.max(parseInt(searchParams.get('days') || '30'), 1), 90);

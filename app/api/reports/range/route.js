@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { requireAdminApiSession } from '@/lib/admin-auth';
 import { supabase } from '@/lib/supabase';
 
 /**
@@ -8,6 +9,9 @@ import { supabase } from '@/lib/supabase';
  * Returns cumulative totals and averages for each SE.
  */
 export async function GET(request) {
+  const unauthorizedResponse = await requireAdminApiSession(request);
+  if (unauthorizedResponse) return unauthorizedResponse;
+
   try {
     const { searchParams } = new URL(request.url);
     const startDate = searchParams.get('startDate');
