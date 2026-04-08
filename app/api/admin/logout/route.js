@@ -1,8 +1,13 @@
 import { NextResponse } from 'next/server';
 
-import { ADMIN_SESSION_COOKIE } from '@/lib/admin-auth';
+import { ADMIN_SESSION_COOKIE, requireSameOrigin } from '@/lib/admin-auth';
 
-export async function POST() {
+export async function POST(request) {
+  const sameOriginResponse = requireSameOrigin(request);
+  if (sameOriginResponse) {
+    return sameOriginResponse;
+  }
+
   const response = NextResponse.json({ success: true });
   response.cookies.set(ADMIN_SESSION_COOKIE, '', {
     httpOnly: true,

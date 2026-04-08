@@ -1,9 +1,13 @@
 import { NextResponse } from 'next/server';
+import { requireAdminApiSession } from '@/lib/admin-auth';
 import { supabase }     from '@/lib/supabase';
 import { runTeamPipeline } from '@/lib/agents/orchestrator';
 import { AppError, resolveError } from '@/lib/errors';
 
 export async function POST(request) {
+  const unauthorizedResponse = await requireAdminApiSession(request);
+  if (unauthorizedResponse) return unauthorizedResponse;
+
   try {
     const body       = await request.json();
     const reportDate = body.date    || yesterdayDate();
@@ -41,7 +45,8 @@ export async function POST(request) {
     const totalSEs = fullReports.length;
 
     // ── Shared data (brands + roster + 14-day feedback trends) ───────────────
-    const twoWeeksAgo    = new Date();
+    // Anchor the 14-day window to reportDate, not today, so historical re-runs get the correct window
+    const twoWeeksAgo    = new Date(reportDate);
     twoWeeksAgo.setDate(twoWeeksAgo.getDate() - 14);
     const twoWeeksAgoStr = twoWeeksAgo.toISOString().split('T')[0];
 

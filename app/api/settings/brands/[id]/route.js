@@ -1,7 +1,11 @@
 import { NextResponse } from 'next/server';
+import { requireAdminApiSession } from '@/lib/admin-auth';
 import { supabase } from '@/lib/supabase';
 
 export async function PATCH(request, { params }) {
+  const unauthorizedResponse = await requireAdminApiSession(request);
+  if (unauthorizedResponse) return unauthorizedResponse;
+
   const { id } = await params;
   const body   = await request.json();
 
@@ -14,7 +18,10 @@ export async function PATCH(request, { params }) {
   return NextResponse.json({ success: true });
 }
 
-export async function DELETE(_, { params }) {
+export async function DELETE(request, { params }) {
+  const unauthorizedResponse = await requireAdminApiSession(request);
+  if (unauthorizedResponse) return unauthorizedResponse;
+
   const { id } = await params;
   const { error } = await supabase
     .from('brand_partners').update({ deleted: 1 }).eq('id', id);

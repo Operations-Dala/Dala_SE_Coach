@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { requireAdminApiSession } from '@/lib/admin-auth';
 import { supabase } from '@/lib/supabase';
 import { runWeeklyReviewAgent } from '@/lib/agents/weekly-review-agent';
 
@@ -13,6 +14,9 @@ import { runWeeklyReviewAgent } from '@/lib/agents/weekly-review-agent';
  */
 
 export async function GET(request) {
+  const unauthorizedResponse = await requireAdminApiSession(request);
+  if (unauthorizedResponse) return unauthorizedResponse;
+
   const { searchParams } = new URL(request.url);
   const seName     = searchParams.get('se');
   const weekEnding = searchParams.get('week_ending') || lastSundayStr();
@@ -31,6 +35,9 @@ export async function GET(request) {
 }
 
 export async function POST(request) {
+  const unauthorizedResponse = await requireAdminApiSession(request);
+  if (unauthorizedResponse) return unauthorizedResponse;
+
   try {
     const body       = await request.json();
     const seName     = body.se_name;

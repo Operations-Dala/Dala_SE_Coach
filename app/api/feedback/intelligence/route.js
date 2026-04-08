@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { requireAdminApiSession } from '@/lib/admin-auth';
 import { supabase } from '@/lib/supabase';
 
 /**
@@ -14,6 +15,9 @@ import { supabase } from '@/lib/supabase';
  *   - recent raw field observations
  */
 export async function GET(request) {
+  const unauthorizedResponse = await requireAdminApiSession(request);
+  if (unauthorizedResponse) return unauthorizedResponse;
+
   const { searchParams } = new URL(request.url);
   const days = Math.min(parseInt(searchParams.get('days') || '14', 10), 60);
 

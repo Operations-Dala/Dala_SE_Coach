@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { requireAdminApiSession } from '@/lib/admin-auth';
 import { supabase } from '@/lib/supabase';
 
 /**
@@ -7,7 +8,12 @@ import { supabase } from '@/lib/supabase';
  * Returns active brands that had zero orders across ALL SEs in the last 3 days.
  * Also returns brands with zero orders in the last 2 days (for orange warning).
  */
-export async function GET() {
+export async function GET(request) {
+  const unauthorizedResponse = await requireAdminApiSession(request);
+  if (unauthorizedResponse) {
+    return unauthorizedResponse;
+  }
+
   const today = new Date();
   const dates = [];
   for (let i = 1; i <= 3; i++) {

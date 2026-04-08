@@ -232,13 +232,16 @@ export default function ImportPage() {
                     onChange={f => setFiles(p => ({ ...p, feedback: f }))} chosen={files.feedback?.name} />
                 </div>
 
-                <div className="flex items-center gap-4 mb-6">
+                <div className="flex items-center gap-4 mb-4">
                   <div>
                     <label className="block text-xs text-slate-500 mb-1.5">REPORT DATE</label>
                     <input type="date" value={date} onChange={e => setDate(e.target.value)}
                       className="bg-slate-100 border border-slate-300 rounded px-3 py-2 text-sm text-slate-900" />
                   </div>
                 </div>
+                <p className="text-xs text-slate-400">
+                  Select all 3 files above, then click <span className="font-semibold text-slate-500">Upload &amp; Generate Reports</span> to upload and process them.
+                </p>
 
               </div>
 
@@ -250,7 +253,7 @@ export default function ImportPage() {
                     Processing…
                   </>
                 ) : (
-                  <>⚡ Generate All Reports</>
+                  <>⚡ Upload &amp; Generate Reports</>
                 )}
               </button>
             </form>
@@ -326,12 +329,15 @@ function FileInput({ label, accept, onChange, chosen }) {
   return (
     <div>
       <label className="block text-xs text-slate-400 mb-2">{label}</label>
-      <label className="flex items-center gap-3 bg-slate-200/50 border border-slate-300 border-dashed rounded-lg px-4 py-3 cursor-pointer hover:bg-slate-200 transition-colors">
-        <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8} className="text-slate-500 flex-shrink-0">
+      <label className="flex items-center gap-3 bg-slate-50 border border-slate-300 border-dashed rounded-lg px-4 py-3 cursor-pointer hover:bg-slate-100 transition-colors group">
+        <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8} className="text-slate-400 flex-shrink-0">
           <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
         </svg>
-        <span className={`text-sm truncate ${chosen ? 'text-slate-900' : 'text-slate-400'}`}>
-          {chosen || 'Choose file…'}
+        <span className={`text-sm truncate flex-1 ${chosen ? 'text-slate-900 font-medium' : 'text-slate-400'}`}>
+          {chosen || 'No file chosen'}
+        </span>
+        <span className="text-xs font-semibold px-3 py-1.5 rounded-md bg-white border border-slate-300 text-slate-600 group-hover:border-slate-400 group-hover:text-slate-800 transition-colors flex-shrink-0">
+          Browse
         </span>
         <input type="file" accept={accept} onChange={e => onChange(e.target.files[0] || null)} className="hidden" />
       </label>

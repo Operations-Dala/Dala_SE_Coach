@@ -1,8 +1,12 @@
 import { NextResponse } from 'next/server';
+import { requireAdminApiSession } from '@/lib/admin-auth';
 import { supabase } from '@/lib/supabase';
 import { extractDocxText } from '@/lib/doc-parser';
 
-export async function GET(_, { params }) {
+export async function GET(request, { params }) {
+  const unauthorizedResponse = await requireAdminApiSession(request);
+  if (unauthorizedResponse) return unauthorizedResponse;
+
   const { name } = await params;
   const seName = decodeURIComponent(name);
   const { data } = await supabase
@@ -14,6 +18,9 @@ export async function GET(_, { params }) {
 }
 
 export async function POST(request, { params }) {
+  const unauthorizedResponse = await requireAdminApiSession(request);
+  if (unauthorizedResponse) return unauthorizedResponse;
+
   const { name } = await params;
   const seName   = decodeURIComponent(name);
   const formData = await request.formData();
@@ -32,7 +39,10 @@ export async function POST(request, { params }) {
   return NextResponse.json({ success: true, se_name: seName, file_name: file.name });
 }
 
-export async function DELETE(_, { params }) {
+export async function DELETE(request, { params }) {
+  const unauthorizedResponse = await requireAdminApiSession(request);
+  if (unauthorizedResponse) return unauthorizedResponse;
+
   const { name } = await params;
   const seName = decodeURIComponent(name);
   const { error } = await supabase.from('se_profiles').delete().eq('se_name', seName);

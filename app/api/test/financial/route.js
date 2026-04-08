@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { requireAdminApiSession } from '@/lib/admin-auth';
 import { supabase }     from '@/lib/supabase';
 
 /**
@@ -16,6 +17,9 @@ function rand(min, max) {
 }
 
 export async function POST(request) {
+  const unauthorizedResponse = await requireAdminApiSession(request);
+  if (unauthorizedResponse) return unauthorizedResponse;
+
   const { searchParams } = new URL(request.url);
   const date = searchParams.get('date') || todayStr();
 
@@ -65,6 +69,9 @@ export async function POST(request) {
 }
 
 export async function DELETE(request) {
+  const unauthorizedResponse = await requireAdminApiSession(request);
+  if (unauthorizedResponse) return unauthorizedResponse;
+
   const { searchParams } = new URL(request.url);
   const date = searchParams.get('date') || todayStr();
 
