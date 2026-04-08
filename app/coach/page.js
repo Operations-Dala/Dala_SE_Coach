@@ -20,10 +20,10 @@ const TREND_META = {
 };
 
 const DEBT_META = {
-  clean:    { label: 'Clean',    color: 'text-green-600' },
-  moderate: { label: 'Moderate', color: 'text-yellow-600'},
-  high:     { label: 'High',     color: 'text-orange-600'},
-  critical: { label: 'Critical', color: 'text-red-600'  },
+  excellent: { label: 'Excellent', color: 'text-green-600'  },
+  good:      { label: 'Good',      color: 'text-blue-600'   },
+  concern:   { label: 'Concern',   color: 'text-yellow-600' },
+  critical:  { label: 'Critical',  color: 'text-red-600'    },
 };
 
 const URGENCY_META = {

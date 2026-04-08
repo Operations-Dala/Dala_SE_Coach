@@ -86,6 +86,7 @@ export async function POST(request) {
     const reportRows = scored.map(s => ({
       report_date: s.report_date,
       se_name: s.se_name,
+      status: s.status,
       resumption_time: s.resumption_time,
       stores_visited: s.stores_visited,
       brands_ordered: s.brands_ordered,
