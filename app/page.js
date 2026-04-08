@@ -44,6 +44,9 @@ export default function Dashboard() {
   const [tableView, setTableView]     = useState('zone');
   const [filterStatus, setFilterStatus] = useState('all');
   const [rangeView, setRangeView]     = useState('zone');
+  const [showCustom, setShowCustom]   = useState(false);
+  const [customStart, setCustomStart] = useState('');
+  const [customEnd, setCustomEnd]     = useState('');
 
   const loadData = useCallback(async (d, range) => {
     setLoading(true);
@@ -82,6 +85,20 @@ export default function Dashboard() {
     } else {
       setSelectedRange(preset);
     }
+  }
+
+  function handleApplyCustomRange() {
+    if (!customStart || !customEnd || customStart > customEnd) return;
+    const days = Math.round((new Date(customEnd) - new Date(customStart)) / 86400000) + 1;
+    const start = customStart;
+    const rangeObj = {
+      label: 'Custom',
+      getDays: () => days,
+      getStartDate: () => start,
+    };
+    setDate(customEnd);
+    setSelectedRange(rangeObj);
+    setShowCustom(false);
   }
 
 
@@ -316,10 +333,10 @@ export default function Dashboard() {
       </div>
 
       {/* ── Date range presets ───────────────────────────────────── */}
-      <div className="flex items-center gap-1.5 mb-6 flex-wrap">
+      <div className="flex items-center gap-1.5 mb-3 flex-wrap">
         <span className="text-xs text-slate-400 mr-1">Range:</span>
         {DATE_RANGE_PRESETS.map(preset => (
-          <button key={preset.label} onClick={() => handleRangeSelect(preset)}
+          <button key={preset.label} onClick={() => { handleRangeSelect(preset); setShowCustom(false); }}
             className={`text-xs px-3 py-1 rounded border transition-colors ${
               selectedRange?.label === preset.label
                 ? 'bg-red-600 text-white border-red-600'
@@ -328,12 +345,53 @@ export default function Dashboard() {
             {preset.label}
           </button>
         ))}
-        {selectedRange && (
+        <button
+          onClick={() => { setShowCustom(p => !p); if (selectedRange?.label === 'Custom') { setSelectedRange(null); setRangeData(null); } }}
+          className={`text-xs px-3 py-1 rounded border transition-colors ${
+            selectedRange?.label === 'Custom' || showCustom
+              ? 'bg-red-600 text-white border-red-600'
+              : 'bg-slate-50 text-slate-500 border-slate-200 hover:text-slate-900 hover:border-slate-300'
+          }`}>
+          Custom
+        </button>
+        {selectedRange && selectedRange.label !== 'Custom' && (
           <span className="text-xs text-slate-400 ml-1">
             — {selectedRange.getDays(date)} days ending {date}
           </span>
         )}
+        {selectedRange?.label === 'Custom' && (
+          <span className="text-xs text-slate-400 ml-1">
+            — {customStart} → {customEnd}
+          </span>
+        )}
       </div>
+
+      {/* ── Custom date range picker ─────────────────────────────── */}
+      {showCustom && (
+        <div className="flex items-end gap-3 mb-4 bg-slate-50 border border-slate-200 rounded-lg px-4 py-3 flex-wrap">
+          <div>
+            <label className="block text-[10px] text-slate-400 uppercase tracking-widest mb-1">Start Date</label>
+            <input type="date" value={customStart} onChange={e => setCustomStart(e.target.value)}
+              className="bg-white border border-slate-300 rounded px-3 py-1.5 text-sm text-slate-900" />
+          </div>
+          <div>
+            <label className="block text-[10px] text-slate-400 uppercase tracking-widest mb-1">End Date</label>
+            <input type="date" value={customEnd} onChange={e => setCustomEnd(e.target.value)}
+              className="bg-white border border-slate-300 rounded px-3 py-1.5 text-sm text-slate-900" />
+          </div>
+          <button
+            onClick={handleApplyCustomRange}
+            disabled={!customStart || !customEnd || customStart > customEnd}
+            className="bg-red-600 hover:bg-red-500 disabled:opacity-40 text-white text-xs font-medium px-4 py-2 rounded transition-colors">
+            Apply Range
+          </button>
+          {customStart && customEnd && customStart <= customEnd && (
+            <span className="text-xs text-slate-400 self-center">
+              {Math.round((new Date(customEnd) - new Date(customStart)) / 86400000) + 1} calendar days
+            </span>
+          )}
+        </div>
+      )}
 
       {/* ── Two-column body ──────────────────────────────────────── */}
       <div className="flex gap-6 items-start">
