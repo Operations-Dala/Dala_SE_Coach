@@ -1,14 +1,14 @@
 import { redirect } from 'next/navigation';
 
 import AdminLoginForm from '@/app/components/AdminLoginForm';
-import { isAdminLockEnabled } from '@/lib/admin-auth';
+import { shouldEnforceAdminApiAuth } from '@/lib/admin-auth';
 
 export const metadata = {
   title: 'Admin Login | SE Coach',
 };
 
 export default async function LoginPage({ searchParams }) {
-  if (!isAdminLockEnabled()) {
+  if (!shouldEnforceAdminApiAuth()) {
     redirect('/');
   }
 

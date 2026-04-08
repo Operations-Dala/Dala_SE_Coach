@@ -3,7 +3,7 @@ import { NextResponse } from 'next/server';
 import {
   ADMIN_SESSION_COOKIE,
   hasAdminConfig,
-  isAdminLockEnabled,
+  shouldEnforceAdminApiAuth,
   isValidAdminSession,
 } from '@/lib/admin-auth';
 
@@ -13,7 +13,7 @@ const PUBLIC_API_PATHS = new Set(['/api/admin/login', '/api/admin/logout']);
 export async function proxy(request) {
   const { pathname, search } = request.nextUrl;
 
-  if (!isAdminLockEnabled()) {
+  if (!shouldEnforceAdminApiAuth()) {
     return NextResponse.next();
   }
 
