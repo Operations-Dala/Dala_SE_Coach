@@ -4,6 +4,11 @@ import Sidebar from '@/app/components/Sidebar';
 export const metadata = {
   title: 'SE Coach',
   description: 'Daily Sales Executive Performance & Coaching',
+  icons: {
+    icon: '/icon.png?v=20260408',
+    shortcut: '/icon.png?v=20260408',
+    apple: '/icon.png?v=20260408',
+  },
 };
 
 export default function RootLayout({ children }) {
